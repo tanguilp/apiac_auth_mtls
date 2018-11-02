@@ -35,7 +35,7 @@ defmodule APISexAuthMTLS do
 
   ## Example
 
-  ## Configuring Phoenix for `#{__MODULE__}` authentication
+  ## Configuring Phoenix for `#{inspect(__MODULE__)}` authentication
 
   ## Security considerations
 
@@ -59,13 +59,16 @@ defmodule APISexAuthMTLS do
 
       {method, _, selfsigned_callback} when method in [:selfsigned, :both] and not is_function(selfsigned_callback, 1) ->
         raise "Missing :selfsigned_callback option"
+
+      _ ->
+        :ok
     end
 
     opts
   end
 
   @impl Plug
-  def call(conn, %{} = opts) do
+  def call(conn, opts) do
     with {:ok, conn, credentials} <- extract_credentials(conn, opts),
          {:ok, conn} <- validate_credentials(conn, credentials, opts)
     do
