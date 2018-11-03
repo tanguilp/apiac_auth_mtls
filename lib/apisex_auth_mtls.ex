@@ -69,10 +69,9 @@ defmodule APISexAuthMTLS do
         :ok
     end
 
-    %{opts |
-      set_authn_error_response: Keyword.get(opts, :set_authn_error_response, true),
-      halt_on_authn_failure: Keyword.get(opts, :halt_on_authn_failure, true)
-    }
+    opts
+    |> Keyword.put_new(:set_authn_error_response, true)
+    |> Keyword.put_new(:halt_on_authn_failure, true)
   end
 
   @impl Plug
@@ -149,7 +148,7 @@ defmodule APISexAuthMTLS do
         {:error, conn, :no_client_cert_authentication}
 
       raw_tls_cert ->
-        {:ok, conn, raw_tls_cert}
+        {:ok, raw_tls_cert}
     end
   end
 
@@ -161,11 +160,11 @@ defmodule APISexAuthMTLS do
   @impl APISex.Authenticator
   def validate_credentials(conn, {client_id, raw_tls_cert}, opts) do
     # not documented, but pkix_decode_cert/2 returns an {:error, reason} tuple
-    case X509.Certificate.from_der(raw_tls_cert, :otp) do
+    case X509.Certificate.from_der(raw_tls_cert) do
       {:error, _} ->
         {:error, conn, :cert_decode_error}
 
-      cert ->
+      {:ok, cert} ->
         # technically a root CA certificate is also self-signed, however it
         # 1- is absolutely unlikely it would be used for that
         # 2- wouldn't have the same public key info, so couldn't impersonate
@@ -202,7 +201,7 @@ defmodule APISexAuthMTLS do
         [registered_certs] # when only one cert is returned
       end,
       fn registered_cert ->
-        # TODO: is that ok to compare nested struct like this?
+        # FIXME: is that ok to compare nested struct like this?
         # should we pattern match with = instead?
         get_subject_public_key_info(registered_cert) == peer_cert_subject_public_key_info
       end
@@ -254,7 +253,7 @@ defmodule APISexAuthMTLS do
       |> X509.Certificate.subject()
       |> X509.RDNSequence.to_string()
 
-      # TODO: is comparing string representations of this DNs ok on a security
+      # FIXME: is comparing string representations of this DNs ok on a security
       # point of view? Or shall we compare the raw SDNs?
       # See further https://tools.ietf.org/html/rfc5280#section-7.1
     if registered_client_cert_sdn_str == peer_cert_sdn_str do
