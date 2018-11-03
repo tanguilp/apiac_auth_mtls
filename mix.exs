@@ -27,6 +27,7 @@ defmodule APISexAuthMTLS.MixProject do
       {:oauth2_utils, github: "tanguilp/oauth2_utils", tag: "master"},
       {:x509, "~> 0.4.0"},
       {:plug_cowboy, "~> 2.0", only: :test},
+      {:poison, "~> 3.1", only: :test},
       {:ex_doc, "~> 0.19", only: :dev, runtime: false}
     ]
   end

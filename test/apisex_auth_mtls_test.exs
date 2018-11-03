@@ -54,7 +54,8 @@ defmodule APISexAuthMTLSTest do
       ]],
       [])
 
-
     assert elem(status, 1) == 200
+    assert Poison.decode!(body)["apisex_client"] == "testclient"
+    assert Poison.decode!(body)["apisex_authenticator"] == "Elixir.APISexAuthMTLS"
   end
 end
