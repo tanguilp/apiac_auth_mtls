@@ -32,6 +32,11 @@ defmodule APISexAuthMTLS do
   function that takes the `client_id` as a parameter and returns the DER-encoded certificate
   or the list of DER-encoded certificate for `the client_id`, or `nil` if no certificate
   is registered for that client
+  - `set_authn_error_response`: if `true`, sets the HTTP status code to `401`.
+  If false, does not change them. Defaults to `true`
+  - `halt_on_authn_failure`: if set to `true`, halts the connection and directly sends the
+  response. When set to `false`, does nothing and therefore allows chaining several
+  authenticators. Defaults to `true`
 
   ## Example
 
@@ -64,7 +69,10 @@ defmodule APISexAuthMTLS do
         :ok
     end
 
-    opts
+    %{opts |
+      set_authn_error_response: Keyword.get(opts, :set_authn_error_response, true),
+      halt_on_authn_failure: Keyword.get(opts, :halt_on_authn_failure, true)
+    }
   end
 
   @impl Plug
@@ -201,6 +209,11 @@ defmodule APISexAuthMTLS do
     )
 
     if public_key_info_match do
+      conn =
+        conn
+        |> Plug.Conn.put_private(:apisex_authenticator, __MODULE__)
+        |> Plug.Conn.put_private(:apisex_client, client_id)
+
       {:ok, conn}
     else
       {:error, conn, %APISex.Authenticator.Unauthorized{
@@ -245,6 +258,11 @@ defmodule APISexAuthMTLS do
       # point of view? Or shall we compare the raw SDNs?
       # See further https://tools.ietf.org/html/rfc5280#section-7.1
     if registered_client_cert_sdn_str == peer_cert_sdn_str do
+      conn =
+        conn
+        |> Plug.Conn.put_private(:apisex_authenticator, __MODULE__)
+        |> Plug.Conn.put_private(:apisex_client, client_id)
+
       {:ok, conn}
     else
       {:error, conn, %APISex.Authenticator.Unauthorized{
