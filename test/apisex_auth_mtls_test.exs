@@ -102,7 +102,7 @@ defmodule APISexAuthMTLSTest do
                       key: {:ECPrivateKey, X509.PrivateKey.to_der(server_ca_private_key)},
                       verify: :verify_peer)
 
-    {:ok, {status, _headers, _body}} =
+    {:ok, {status, _headers, body}} =
       :httpc.request(:post,
       {'https://localhost:8443', [], 'application/x-www-form-urlencoded', 'client_id=testclient'},
       [ssl: [
@@ -113,6 +113,7 @@ defmodule APISexAuthMTLSTest do
       [])
 
     assert elem(status, 1) == 401
+    assert body == []
   end
 
   test "valid self-signed certificate", context do
@@ -196,7 +197,7 @@ defmodule APISexAuthMTLSTest do
       [])
 
     assert elem(status, 1) == 401
-    assert body = ""
+    assert body == []
   end
 
   defp verify_fun_selfsigned_cert(_, {:bad_cert, :selfsigned_peer}, user_state),
