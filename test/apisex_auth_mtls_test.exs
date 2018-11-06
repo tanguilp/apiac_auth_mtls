@@ -116,7 +116,7 @@ defmodule APISexAuthMTLSTest do
     assert body == []
   end
 
-  test "valid self-signed certificate", context do
+  test "valid self-signed certificate (DER-encoded)", context do
 
     peer_private_key = X509.PrivateKey.new_ec(:secp256r1)
     peer_cert = X509.Certificate.self_signed(peer_private_key,
@@ -125,6 +125,46 @@ defmodule APISexAuthMTLSTest do
     )
 
     :ets.insert(:mtls_test, {:cert, X509.Certificate.to_der(peer_cert)})
+
+    server_ca_private_key = X509.PrivateKey.new_ec(:secp256r1)
+    server_ca_cert = X509.Certificate.self_signed(server_ca_private_key,
+      "/C=RU/ST=SPB/L=SPB/O=APISexAuthBearer/CN=test server certificate",
+      template: :root_ca,
+      extensions: [subject_alt_name: X509.Certificate.Extension.subject_alt_name(["localhost"])])
+
+    Plug.Cowboy.https(SelfSignedCert, [],
+                      port: 8443,
+                      ref: context[:ref],
+                      key: {:ECPrivateKey, X509.PrivateKey.to_der(server_ca_private_key)},
+                      cert: X509.Certificate.to_der(server_ca_cert),
+                      verify: :verify_peer,
+                      verify_fun: {&verify_fun_selfsigned_cert/3, []}
+    )
+
+    {:ok, {status, _headers, body}} =
+      :httpc.request(:post,
+      {'https://localhost:8443', [], 'application/x-www-form-urlencoded', 'client_id=testclient'},
+      [ssl: [
+        cacerts: [X509.Certificate.to_der(server_ca_cert)],
+        cert: X509.Certificate.to_der(peer_cert),
+        key: {:ECPrivateKey, X509.PrivateKey.to_der(peer_private_key)}
+      ]],
+      [])
+
+    assert elem(status, 1) == 200
+    assert Poison.decode!(body)["apisex_client"] == "testclient"
+    assert Poison.decode!(body)["apisex_authenticator"] == "Elixir.APISexAuthMTLS"
+  end
+
+  test "valid self-signed certificate (OTP certificate struct)", context do
+
+    peer_private_key = X509.PrivateKey.new_ec(:secp256r1)
+    peer_cert = X509.Certificate.self_signed(peer_private_key,
+      "/C=BZ/ST=MBH/L=Lorient/O=APISexAuthBearer/CN=test self-signed CA peer certificate",
+      template: :server
+    )
+
+    :ets.insert(:mtls_test, {:cert, peer_cert})
 
     server_ca_private_key = X509.PrivateKey.new_ec(:secp256r1)
     server_ca_cert = X509.Certificate.self_signed(server_ca_private_key,
@@ -200,14 +240,19 @@ defmodule APISexAuthMTLSTest do
     assert body == []
   end
 
+  #FIXME should we make it an exported function in main lib?
   defp verify_fun_selfsigned_cert(_, {:bad_cert, :selfsigned_peer}, user_state),
     do: {:valid, user_state}
+
   defp verify_fun_selfsigned_cert(_, {:bad_cert, _} = reason, _),
     do: {:fail, reason}
+
   defp verify_fun_selfsigned_cert(_, {:extension, _}, user_state),
     do: {:unkown, user_state}
+
   defp verify_fun_selfsigned_cert(_, :valid, user_state),
     do: {:valid, user_state}
+
   defp verify_fun_selfsigned_cert(_, :valid_peer, user_state),
     do: {:valid, user_state}
 end

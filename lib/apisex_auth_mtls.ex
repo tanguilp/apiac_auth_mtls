@@ -3,20 +3,21 @@ defmodule APISexAuthMTLS do
   @behaviour APISex.Authenticator
 
   @moduledoc """
-  An `APISex.Authenticator` plug implementing [RFCXXXX](https://tools.ietf.org)
+  An `APISex.Authenticator` plug implementing [RFCXXXX](https://tools.ietf.org/html/draft-ietf-oauth-mtls-12)
   **section 2** of 'OAuth 2.0 Mutual TLS Client Authentication and Certificate
   Bound Access Tokens'
 
   Using this scheme, authentication is performed thanks to 2 elements:
   - TLS client certificate authentication
-  - the `client_id` paramter of the `application/x-www-form-urlencoded` body
+  - the `client_id` parameter of the `application/x-www-form-urlencoded` body
 
-  TLS client certificate authentication may be performed using two methods:
-  - a certificate issued by a Certificate Authority (CA) which is called [PKI
+  TLS client certificate authentication may be performed thanks to two methods:
+  - authentication with
+  a certificate issued by a Certificate Authority (CA) which is called [PKI
   Mutual TLS OAuth Client Authentication Method](https://tools.ietf.org/html/draft-ietf-oauth-mtls-12#section-2.1).
   In this case, the certificate **Distinguished Name** (DN) is checked against
   the DN registered for the `client_id`
-  - a self-signed, self-issued certificate which is called [Self-Signed Certificate
+  - authentication with a self-signed, self-issued certificate which is called [Self-Signed Certificate
   Mutual TLS OAuth Client Authentication Method](https://tools.ietf.org/html/draft-ietf-oauth-mtls-12#section-2.2).
   In this case, the certificate is checked against the **subject public key info**
   of the registered certificates of the `client_id`
@@ -29,9 +30,10 @@ defmodule APISexAuthMTLS do
   a parameter and returns its DN as a `String.t` or `nil` if no DN is registered for
   that client
   - `selfsigned_callback`: a `(String.t -> binary() | [binary()] | nil)`
-  function that takes the `client_id` as a parameter and returns the DER-encoded certificate
-  or the list of DER-encoded certificate for `the client_id`, or `nil` if no certificate
-  is registered for that client
+  function that takes the `client_id` as a parameter and returns the certificate
+  or the list of the certificate for `the client_id`, or `nil` if no certificate
+  is registered for that client. Certificates can be returned in DER-encoded format, or
+  native OTP certificate structure
   - `set_authn_error_response`: if `true`, sets the HTTP status code to `401`.
   If false, does not change them. Defaults to `true`
   - `halt_on_authn_failure`: if set to `true`, halts the connection and directly sends the
@@ -40,9 +42,119 @@ defmodule APISexAuthMTLS do
 
   ## Example
 
-  ## Configuring Phoenix for `#{inspect(__MODULE__)}` authentication
+  ```elixir
+  Plug APISexAuthBasic, allowed_methods: :both,
+                        selfsigned_callback: &selfsigned_certs/1,
+                        pki_callback: &get_dn/1
+
+  # further
+
+  defp selfsigned_certs(client_id) do
+    :ets.lookup_element(:clients, :client_id, 5)
+  end
+
+  defp get_dn("client-1") do
+    "/C=US/ST=ARI/L=Chicago/O=Agora/CN=API access certificate"
+  end
+
+  defp get_dn(_), do: nil
+  ```
+
+  ## Configuring TLS for `#{inspect(__MODULE__)}` authentication
+
+  Plugs can authenticate requests on elements contained in the HTTP request.
+  Mutual TLS authentication, however, occurs on the TLS layer and the authentication
+  context is only then passed to the plug (`peer_data`).
+
+  Usually, when using TLS, only the server is authenticated by the client. But client
+  authentication by the server can also be activated on an TLS-enabled server:
+  in this case, both the server and the clients authenticate to each other.
+  Client authentication can either be optional or mandatory.
+
+  When a TLS-enabled server authenticates a client, it checks the client's certificate
+  against its list of known certificate authorities (CA). CAs are trusted root certificates.
+  The list of CAs can be changed through configuration.
+
+  Note that by default, the Erlang TLS stack does not accept self-signed certificate.
+  FIXME: what is the rationale?
+
+  All TLS options are documented in the
+  [Erlang SSL module documentation](http://erlang.org/doc/man/ssl.html).
+
+  ### Enabling TLS client authentication
+
+  This table summarizes which options are to be activated *on the server*:
+
+  | Use-case                            | TLS options                                             |
+  |-------------------------------------|---------------------------------------------------------|
+  | No client authentication (default)  | (no specific option to set)                             |
+  | Optional client authentication      | -`verify: :verify_peer`                                 |
+  | Mandatory client authentication     | -`verify: :verify_peer`<br>- `fail_if_no_peer_cert: true` |
+
+  ### Example with `plug_cowboy`
+
+  To enable optional TLS client authentication:
+  ```elixir
+  Plug.Cowboy.https(MyPlug, [],
+                    port: 8443,
+                    keyfile: "priv/ssl/key.pem",
+                    certfile: "priv/ssl/cer.pem",
+                    verify: :verify_peer)
+  ```
+
+  To enable mandatory TLS client authentication:
+  ```elixir
+  Plug.Cowboy.https(MyPlug, [],
+                    port: 8443,
+                    keyfile: "priv/ssl/key.pem",
+                    certfile: "priv/ssl/cer.pem",
+                    verify: :verify_peer,
+                    fail_if_no_peer_cert: true)
+  ```
+
+  ### Allowing TLS connection of clients with self-signed certificates
+
+  By default, Erlang's TLS stack rejects self-signed client certificates. To allow it,
+  use the `verify_fun` TLS parameter with the following function:
+
+  ```elixir
+  defp verify_fun_selfsigned_cert(_, {:bad_cert, :selfsigned_peer}, user_state),
+    do: {:valid, user_state}
+
+  defp verify_fun_selfsigned_cert(_, {:bad_cert, _} = reason, _),
+    do: {:fail, reason}
+
+  defp verify_fun_selfsigned_cert(_, {:extension, _}, user_state),
+    do: {:unkown, user_state}
+
+  defp verify_fun_selfsigned_cert(_, :valid, user_state),
+    do: {:valid, user_state}
+
+  defp verify_fun_selfsigned_cert(_, :valid_peer, user_state),
+    do: {:valid, user_state}
+  ```
+
+  Example with `plug_cowboy`:
+
+  ```elixir
+  Plug.Cowboy.https(MyPlug, [],
+                    port: 8443,
+                    keyfile: "priv/ssl/key.pem",
+                    certfile: "priv/ssl/cer.pem",
+                    verify: :verify_peer,
+                    verify_fun: {&verify_fun_selfsigned_cert/3, []})
+  ```
+
+  FIXME: what are the security implications of doing that?
 
   ## Security considerations
+
+  In addition to the security considerations listed in the RFC, consider that:
+  - Before TLS1.3, client authentication may leak information
+  ([further information](https://blog.funkthat.com/2018/10/tls-client-authentication-leaks-user.html))
+  - Any CA can signe for any DN (as for any other certificate attribute). Though this is
+  a well-known security limitation of the X509 infrastructure, issuing certificate with
+  rogue DNs may be more difficult to detect (because less monitored)
 
   ## Other considerations
 
@@ -198,7 +310,7 @@ defmodule APISexAuthMTLS do
       if is_list(registered_certs) do
         registered_certs
       else
-        [registered_certs] # when only one cert is returned
+        [registered_certs] # when only one cert is returned, or nil was returned
       end,
       fn registered_cert ->
         # FIXME: is that ok to compare nested struct like this?
@@ -253,9 +365,11 @@ defmodule APISexAuthMTLS do
       |> X509.Certificate.subject()
       |> X509.RDNSequence.to_string()
 
-      # FIXME: is comparing string representations of this DNs ok on a security
-      # point of view? Or shall we compare the raw SDNs?
-      # See further https://tools.ietf.org/html/rfc5280#section-7.1
+    # FIXME: is comparing string representations of this DNs ok on a security
+    # point of view? Or shall we compare the raw SDNs?
+    # See further https://tools.ietf.org/html/rfc5280#section-7.1
+    # FIXME: registered_client_cert can be `nil` Can a certificate's DN
+    # be `nil` too?
     if registered_client_cert_sdn_str == peer_cert_sdn_str do
       conn =
         conn
