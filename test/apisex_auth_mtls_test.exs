@@ -9,7 +9,7 @@ defmodule APISexAuthMTLSTest do
   end
 
   defmodule SelfSignedCert do
-    use TestPlug, [allowed_methods: :pki, pki_callback: &TestHelperFunctions.cert_from_ets/1]
+    use TestPlug, [allowed_methods: :selfsigned, selfsigned_callback: &TestHelperFunctions.cert_from_ets/1]
   end
 
   setup_all do
@@ -19,7 +19,17 @@ defmodule APISexAuthMTLSTest do
     :ok
   end
 
-  test "valid pki certificate" do
+  setup do
+    ref = make_ref()
+
+    on_exit fn ->
+      Plug.Cowboy.shutdown(ref)
+    end
+
+    [ref: ref]
+  end
+
+  test "valid pki certificate", context do
     peer_root_private_key = X509.PrivateKey.new_ec(:secp256r1)
     peer_root_cert = X509.Certificate.self_signed(peer_root_private_key,
       "/C=BZ/ST=MBH/L=Lorient/O=APISexAuthBearer/CN=test root CA peer certificate",
@@ -33,7 +43,6 @@ defmodule APISexAuthMTLSTest do
       |> X509.Certificate.new(
          "/C=BZ/ST=MBH/L=Lorient/O=APISexAuthBearer/CN=test peer certificate",
          peer_root_cert, peer_root_private_key
-         #extensions: [subject_alt_name: X509.Certificate.Extension.subject_alt_name(["localhost"])]
          )
 
     server_ca_private_key = X509.PrivateKey.new_ec(:secp256r1)
@@ -41,11 +50,9 @@ defmodule APISexAuthMTLSTest do
       "/C=RU/ST=SPB/L=SPB/O=APISexAuthBearer/CN=test server certificate",
       template: :root_ca)
 
-    ref = make_ref()
-
     Plug.Cowboy.https(PKICert, [],
                       port: 8443,
-                      ref: ref,
+                      ref: context[:ref],
                       cert: X509.Certificate.to_der(server_ca_cert),
                       cacerts: [X509.Certificate.to_der(peer_root_cert)],
                       key: {:ECPrivateKey, X509.PrivateKey.to_der(server_ca_private_key)},
@@ -60,15 +67,13 @@ defmodule APISexAuthMTLSTest do
         key: {:ECPrivateKey, X509.PrivateKey.to_der(peer_private_key)}
       ]],
       [])
-    
-    Plug.Cowboy.shutdown(ref)
 
     assert elem(status, 1) == 200
     assert Poison.decode!(body)["apisex_client"] == "testclient"
     assert Poison.decode!(body)["apisex_authenticator"] == "Elixir.APISexAuthMTLS"
   end
 
-  test "invalid pki certificate" do
+  test "invalid pki certificate", context do
     peer_root_private_key = X509.PrivateKey.new_ec(:secp256r1)
     peer_root_cert = X509.Certificate.self_signed(peer_root_private_key,
       "/C=BZ/ST=MBH/L=Lorient/O=APISexAuthBearer/CN=test root CA peer certificate",
@@ -82,7 +87,6 @@ defmodule APISexAuthMTLSTest do
       |> X509.Certificate.new(
          "/C=BZ/ST=MBH/L=Lorient/O=APISexAuthBearer/CN=invalid DN",
          peer_root_cert, peer_root_private_key
-         #extensions: [subject_alt_name: X509.Certificate.Extension.subject_alt_name(["localhost"])]
          )
 
     server_ca_private_key = X509.PrivateKey.new_ec(:secp256r1)
@@ -90,10 +94,9 @@ defmodule APISexAuthMTLSTest do
       "/C=RU/ST=SPB/L=SPB/O=APISexAuthBearer/CN=test server certificate",
       template: :root_ca)
 
-    ref = make_ref()
     Plug.Cowboy.https(PKICert, [],
                       port: 8443,
-                      ref: ref,
+                      ref: context[:ref],
                       cert: X509.Certificate.to_der(server_ca_cert),
                       cacerts: [X509.Certificate.to_der(peer_root_cert)],
                       key: {:ECPrivateKey, X509.PrivateKey.to_der(server_ca_private_key)},
@@ -108,35 +111,35 @@ defmodule APISexAuthMTLSTest do
         key: {:ECPrivateKey, X509.PrivateKey.to_der(peer_private_key)}
       ]],
       [])
-    
-    Plug.Cowboy.shutdown(ref)
 
     assert elem(status, 1) == 401
   end
 
-  test "valid self-signed certificate" do
+  test "valid self-signed certificate", context do
+
     peer_private_key = X509.PrivateKey.new_ec(:secp256r1)
     peer_cert = X509.Certificate.self_signed(peer_private_key,
       "/C=BZ/ST=MBH/L=Lorient/O=APISexAuthBearer/CN=test self-signed CA peer certificate",
-      template: :root_ca
+      template: :server
     )
 
-    :ets.insert(:mtls_test, {:cert, peer_cert})
+    :ets.insert(:mtls_test, {:cert, X509.Certificate.to_der(peer_cert)})
 
     server_ca_private_key = X509.PrivateKey.new_ec(:secp256r1)
     server_ca_cert = X509.Certificate.self_signed(server_ca_private_key,
       "/C=RU/ST=SPB/L=SPB/O=APISexAuthBearer/CN=test server certificate",
-      template: :root_ca)
+      template: :root_ca,
+      extensions: [subject_alt_name: X509.Certificate.Extension.subject_alt_name(["localhost"])])
 
-    ref = make_ref()
-
-    Plug.Cowboy.https(PKICert, [],
+    Plug.Cowboy.https(SelfSignedCert, [],
                       port: 8443,
-                      ref: ref,
-                      cert: X509.Certificate.to_der(server_ca_cert),
-                      cacerts: :certifi.cacerts(),
+                      ref: context[:ref],
                       key: {:ECPrivateKey, X509.PrivateKey.to_der(server_ca_private_key)},
-                      verify: :verify_peer)
+                      cert: X509.Certificate.to_der(server_ca_cert),
+                      cacerts: [X509.Certificate.to_der(peer_cert)] ++ :certifi.cacerts(),
+                      verify: :verify_peer,
+                      verify_fun: {&verify_fun_selfsigned_cert/3, []}
+    )
 
     {:ok, {status, _headers, body}} =
       :httpc.request(:post,
@@ -147,11 +150,20 @@ defmodule APISexAuthMTLSTest do
         key: {:ECPrivateKey, X509.PrivateKey.to_der(peer_private_key)}
       ]],
       [])
-    
-    Plug.Cowboy.shutdown(ref)
 
     assert elem(status, 1) == 200
     assert Poison.decode!(body)["apisex_client"] == "testclient"
     assert Poison.decode!(body)["apisex_authenticator"] == "Elixir.APISexAuthMTLS"
   end
+
+  defp verify_fun_selfsigned_cert(_, {:bad_cert, :selfsigned_peer}, user_state),
+    do: {:valid, user_state}
+  defp verify_fun_selfsigned_cert(_, {:bad_cert, _} = reason, _),
+    do: {:fail, reason}
+  defp verify_fun_selfsigned_cert(_, {:extension, _}, user_state),
+    do: {:unkown, user_state}
+  defp verify_fun_selfsigned_cert(_, :valid, user_state),
+    do: {:valid, user_state}
+  defp verify_fun_selfsigned_cert(_, :valid_peer, user_state),
+    do: {:valid, user_state}
 end

@@ -241,7 +241,7 @@ defmodule APISexAuthMTLS do
   end
 
   defp get_subject_public_key_info(der_encoded_cert) do
-    X509.Certificate.from_der(der_encoded_cert, :otp)
+    X509.Certificate.from_der!(der_encoded_cert)
     |> get_subject_public_key_info()
   end
 
