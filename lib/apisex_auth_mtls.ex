@@ -3,7 +3,8 @@ defmodule APISexAuthMTLS do
   @behaviour APISex.Authenticator
 
   @moduledoc """
-  An `APISex.Authenticator` plug implementing [RFCXXXX](https://tools.ietf.org/html/draft-ietf-oauth-mtls-12)
+  An `APISex.Authenticator` plug implementing
+  [RFCXXXX](https://tools.ietf.org/html/draft-ietf-oauth-mtls-12)
   **section 2** of 'OAuth 2.0 Mutual TLS Client Authentication and Certificate
   Bound Access Tokens'
 
@@ -34,11 +35,10 @@ defmodule APISexAuthMTLS do
   or the list of the certificate for `the client_id`, or `nil` if no certificate
   is registered for that client. Certificates can be returned in DER-encoded format, or
   native OTP certificate structure
-  - `set_authn_error_response`: if `true`, sets the HTTP status code to `401`.
-  If false, does not change them. Defaults to `true`
-  - `halt_on_authn_failure`: if set to `true`, halts the connection and directly sends the
-  response. When set to `false`, does nothing and therefore allows chaining several
-  authenticators. Defaults to `true`
+  - `set_error_response`: function called when authentication failed. Defaults to
+  `APISexAuthBasic.send_error_response/3`
+  - `error_response_verbosity`: one of `:debug`, `:normal` or `:minimal`.
+  Defaults to `:normal`
 
   ## Example
 
@@ -168,13 +168,15 @@ defmodule APISexAuthMTLS do
 
   @impl Plug
   def init(opts) do
-    if is_nil(opts[:allowed_methods]), do: raise ":allowed_methods mandatory option no set"
+    if is_nil(opts[:allowed_methods]), do: raise(":allowed_methods mandatory option not set")
 
     case {opts[:allowed_methods], opts[:pki_callback], opts[:selfsigned_callback]} do
-      {method, pki_callback, _} when method in [:pki, :both] and not is_function(pki_callback, 1) ->
+      {method, pki_callback, _}
+      when method in [:pki, :both] and not is_function(pki_callback, 1) ->
         raise "Missing :pki_callback option"
 
-      {method, _, selfsigned_callback} when method in [:selfsigned, :both] and not is_function(selfsigned_callback, 1) ->
+      {method, _, selfsigned_callback}
+      when method in [:selfsigned, :both] and not is_function(selfsigned_callback, 1) ->
         raise "Missing :selfsigned_callback option"
 
       _ ->
@@ -182,32 +184,19 @@ defmodule APISexAuthMTLS do
     end
 
     opts
-    |> Keyword.put_new(:set_authn_error_response, true)
-    |> Keyword.put_new(:halt_on_authn_failure, true)
+    |> Enum.into(%{})
+    |> Map.put_new(:set_error_response, &APISexAuthMTLS.send_error_response/3)
+    |> Map.put_new(:error_response_verbosity, :normal)
   end
 
   @impl Plug
   def call(conn, opts) do
     with {:ok, conn, credentials} <- extract_credentials(conn, opts),
-         {:ok, conn} <- validate_credentials(conn, credentials, opts)
-    do
+         {:ok, conn} <- validate_credentials(conn, credentials, opts) do
       conn
     else
       {:error, conn, %APISex.Authenticator.Unauthorized{} = error} ->
-        conn =
-          if opts[:set_authn_error_response] do
-            set_error_response(conn, error, opts)
-          else
-            conn
-          end
-
-        if opts[:halt_on_authn_failure] do
-          conn
-          |> Plug.Conn.send_resp()
-          |> Plug.Conn.halt()
-        else
-          conn
-        end
+        opts[:set_error_response].(conn, error, opts)
     end
   end
 
@@ -221,21 +210,22 @@ defmodule APISexAuthMTLS do
   @impl APISex.Authenticator
   def extract_credentials(conn, _opts) do
     with {:ok, conn, client_id} <- get_client_id(conn),
-         {:ok, ssl_cert} <- get_peer_cert(conn)
-    do
+         {:ok, ssl_cert} <- get_peer_cert(conn) do
       {:ok, conn, {client_id, ssl_cert}}
     else
       {:error, conn, reason} ->
-        {:error, conn, %APISex.Authenticator.Unauthorized{
-          authenticator: __MODULE__,
-          reason: reason}}
+        {:error, conn,
+         %APISex.Authenticator.Unauthorized{authenticator: __MODULE__, reason: reason}}
     end
   end
 
   defp get_client_id(conn) do
     try do
-      plug_parser_opts = Plug.Parsers.init(parsers: [:urlencoded],
-                                           pass: ["application/x-www-form-urlencoded"])
+      plug_parser_opts =
+        Plug.Parsers.init(
+          parsers: [:urlencoded],
+          pass: ["application/x-www-form-urlencoded"]
+        )
 
       conn = Plug.Parsers.call(conn, plug_parser_opts)
 
@@ -244,7 +234,7 @@ defmodule APISexAuthMTLS do
       if client_id != nil and OAuth2Utils.client_id?(client_id) do
         {:ok, conn, client_id}
       else
-        {:error, conn, :client_id_not_found_or_invalid}
+        {:error, conn, :credentials_not_found}
       end
     rescue
       UnsupportedMediaTypeError ->
@@ -282,16 +272,18 @@ defmodule APISexAuthMTLS do
         # 2- wouldn't have the same public key info, so couldn't impersonate
         # another client
         # TODO: confirm these assumptions
-        if :public_key.pkix_is_self_signed(cert)
-          and opts[:allowed_methods] in [:selfsigned, :both] do
+        if :public_key.pkix_is_self_signed(cert) and
+             opts[:allowed_methods] in [:selfsigned, :both] do
           validate_self_signed_cert(conn, client_id, cert, opts)
         else
           if opts[:allowed_methods] in [:pki, :both] do
             validate_pki_cert(conn, client_id, cert, opts)
           else
-            {:error, conn, %APISex.Authenticator.Unauthorized{
-              authenticator: __MODULE__,
-              reason: :no_method_provided}}
+            {:error, conn,
+             %APISex.Authenticator.Unauthorized{
+               authenticator: __MODULE__,
+               reason: :no_method_provided
+             }}
           end
         end
     end
@@ -306,18 +298,20 @@ defmodule APISexAuthMTLS do
 
     registered_certs = opts[:selfsigned_callback].(client_id)
 
-    public_key_info_match = Enum.any?(
-      if is_list(registered_certs) do
-        registered_certs
-      else
-        [registered_certs] # when only one cert is returned, or nil was returned
-      end,
-      fn registered_cert ->
-        # FIXME: is that ok to compare nested struct like this?
-        # should we pattern match with = instead?
-        get_subject_public_key_info(registered_cert) == peer_cert_subject_public_key_info
-      end
-    )
+    public_key_info_match =
+      Enum.any?(
+        if is_list(registered_certs) do
+          registered_certs
+        else
+          # when only one cert is returned, or nil was returned
+          [registered_certs]
+        end,
+        fn registered_cert ->
+          # FIXME: is that ok to compare nested struct like this?
+          # should we pattern match with = instead?
+          get_subject_public_key_info(registered_cert) == peer_cert_subject_public_key_info
+        end
+      )
 
     if public_key_info_match do
       conn =
@@ -327,27 +321,21 @@ defmodule APISexAuthMTLS do
 
       {:ok, conn}
     else
-      {:error, conn, %APISex.Authenticator.Unauthorized{
-              authenticator: __MODULE__,
-              reason: :selfsigned_no_cert_match}}
+      {:error, conn,
+       %APISex.Authenticator.Unauthorized{
+         authenticator: __MODULE__,
+         reason: :selfsigned_no_cert_match
+       }}
     end
   end
 
   # destructuring cert, documentation:
   # http://erlang.org/documentation/doc-6.2/lib/public_key-0.22.1/doc/html/cert_records.html
-  defp get_subject_public_key_info({:OTPCertificate, tbsCertificate, _signatureAlgorithm, _signature}) do
-    {:OTPTBSCertificate,
-      _version,
-      _serialNumber,
-      _signature,
-      _issuer,
-      _validity,
-      _subject,
-      subjectPublicKeyInfo,
-      _issuerUniqueID,
-      _subjectUniqueID,
-      _extensions
-    } = tbsCertificate
+  defp get_subject_public_key_info(
+         {:OTPCertificate, tbsCertificate, _signatureAlgorithm, _signature}
+       ) do
+    {:OTPTBSCertificate, _version, _serialNumber, _signature, _issuer, _validity, _subject,
+     subjectPublicKeyInfo, _issuerUniqueID, _subjectUniqueID, _extensions} = tbsCertificate
 
     subjectPublicKeyInfo
   end
@@ -378,15 +366,37 @@ defmodule APISexAuthMTLS do
 
       {:ok, conn}
     else
-      {:error, conn, %APISex.Authenticator.Unauthorized{
-              authenticator: __MODULE__,
-              reason: :pki_no_dn_match}}
+      {:error, conn,
+       %APISex.Authenticator.Unauthorized{authenticator: __MODULE__, reason: :pki_no_dn_match}}
     end
   end
 
+  @doc """
+  Implementation of the `APISex.Authenticator` callback
+
+  ## Verbosity
+
+  The following elements in the HTTP response are set depending on the value
+  of the `:error_response_verbosity` option:
+
+  | Error response verbosity  | HTTP Status        | Headers | Body                                                    |
+  |:-------------------------:|--------------------|---------|---------------------------------------------------------|
+  | `:debug`                  | Unauthorized (401) |         | `APISex.Authenticator.Unauthorized` exception's message |
+  | `:normal`                 | Unauthorized (401) |         |                                                         |
+  | `:minimal`                | Unauthorized (401) |         |                                                         |
+
+  """
   @impl APISex.Authenticator
-  def set_error_response(conn, _error, _opts) do
+  def send_error_response(conn, _error, %{:error_response_verbosity => error_response_verbosity})
+      when error_response_verbosity in [:normal, :minimal] do
     conn
-    |> Plug.Conn.resp(:unauthorized, "")
+    |> Plug.Conn.send_resp(:unauthorized, "")
+    |> Plug.Conn.halt()
+  end
+
+  def send_error_response(conn, error, %{:error_response_verbosity => :debug}) do
+    conn
+    |> Plug.Conn.send_resp(:unauthorized, Exception.message(error))
+    |> Plug.Conn.halt()
   end
 end

@@ -33,11 +33,10 @@ function that takes the `client_id` as a parameter and returns the certificate
 or the list of the certificate for `the client_id`, or `nil` if no certificate
 is registered for that client. Certificates can be returned in DER-encoded format, or
 native OTP certificate structure
-- `set_authn_error_response`: if `true`, sets the HTTP status code to `401`.
-If false, does not change them. Defaults to `true`
-- `halt_on_authn_failure`: if set to `true`, halts the connection and directly sends the
-response. When set to `false`, does nothing and therefore allows chaining several
-authenticators. Defaults to `true`
+- `set_error_response`: function called when authentication failed. Defaults to
+`APISexAuthBasic.send_error_response/3`
+- `error_response_verbosity`: one of `:debug`, `:normal` or `:minimal`.
+Defaults to `:normal`
 
 ## Example
 
