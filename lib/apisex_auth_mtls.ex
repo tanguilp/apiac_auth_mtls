@@ -43,7 +43,7 @@ defmodule APISexAuthMTLS do
   ## Example
 
   ```elixir
-  Plug APISexAuthBasic, allowed_methods: :both,
+  plug APISexAuthBasic, allowed_methods: :both,
                         selfsigned_callback: &selfsigned_certs/1,
                         pki_callback: &get_dn/1
 
