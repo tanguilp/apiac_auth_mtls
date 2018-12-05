@@ -399,4 +399,30 @@ defmodule APISexAuthMTLS do
     |> Plug.Conn.send_resp(:unauthorized, Exception.message(error))
     |> Plug.Conn.halt()
   end
+
+  @doc """
+  Saves failure in a `Plug.Conn.t()`'s private field and returns the `conn`
+
+  See the `APISex.AuthFailureResponseData` module for more information.
+  """
+  @spec save_authentication_failure_response(Plug.Conn.t(),
+                                             %APISex.Authenticator.Unauthorized{},
+                                             any()) :: Plug.Conn.t()
+  def save_authentication_failure_response(conn, error, opts) do
+    failure_response_data =
+      %APISex.AuthFailureResponseData{
+        module: __MODULE__,
+        reason: error.reason,
+        www_authenticate_header: nil,
+        status_code: :unauthorized,
+        body:
+          if opts[:error_response_verbosity] in [:normal, :minimal] do
+            nil
+          else
+            Exception.message(error)
+          end
+      }
+
+    APISex.AuthFailureResponseData.put(conn, failure_response_data)
+  end
 end
