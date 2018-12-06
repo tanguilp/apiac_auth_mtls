@@ -190,7 +190,16 @@ defmodule APISexAuthMTLS do
   end
 
   @impl Plug
-  def call(conn, opts) do
+  @spec call(Plug.Conn, Plug.opts()) :: Plug.Conn
+  def call(conn, %{} = opts) do
+    if APISex.authenticated?(conn) do
+      conn
+    else
+      do_call(conn, opts)
+    end
+  end
+
+  def do_call(conn, opts) do
     with {:ok, conn, credentials} <- extract_credentials(conn, opts),
          {:ok, conn} <- validate_credentials(conn, credentials, opts) do
       conn
