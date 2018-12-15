@@ -240,7 +240,7 @@ defmodule APISexAuthMTLS do
 
       client_id = conn.body_params["client_id"]
 
-      if client_id != nil and OAuth2Utils.client_id?(client_id) do
+      if client_id != nil and OAuth2Utils.valid_client_id_param?(client_id) do
         {:ok, conn, client_id}
       else
         {:error, conn, :credentials_not_found}
