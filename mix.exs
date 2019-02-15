@@ -27,7 +27,7 @@ defmodule APISexAuthMTLS.MixProject do
   defp deps do
     [
       {:plug, "~> 1.0"},
-      {:apisex, github: "tanguilp/apisex", tag: "master"},
+      {:apisex, github: "tanguilp/apisex", tag: "0.1.0"},
       {:oauth2_utils, github: "tanguilp/oauth2_utils", tag: "master"},
       {:x509, "~> 0.4.0"},
       {:plug_cowboy, "~> 2.0", only: :test},

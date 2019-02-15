@@ -190,7 +190,7 @@ defmodule APISexAuthMTLS do
   end
 
   @impl Plug
-  @spec call(Plug.Conn, Plug.opts()) :: Plug.Conn
+  @spec call(Plug.Conn.t(), Plug.opts()) :: Plug.Conn.t()
   def call(conn, %{} = opts) do
     if APISex.authenticated?(conn) do
       conn
@@ -299,11 +299,12 @@ defmodule APISexAuthMTLS do
   end
 
   defp validate_self_signed_cert(conn, client_id, cert, opts) do
-    # TODO: could we not use X509 package to reduce attack surface?
+    # TODO: could we not use X509 package to reduce vuln surface?
     # looks like decoding cert info requires additional Erlang code:
     # https://github.com/jshmrtn/phoenix-client-ssl/blob/master/lib/public_key_subject.erl
 
     peer_cert_subject_public_key_info = get_subject_public_key_info(cert)
+    IO.inspect(peer_cert_subject_public_key_info)
 
     registered_certs = opts[:selfsigned_callback].(client_id)
 

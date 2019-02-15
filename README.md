@@ -41,7 +41,7 @@ Defaults to `:normal`
 ## Example
 
 ```elixir
-plug APISexAuthBasic, allowed_methods: :both,
+plug APISexAuthMTLS, allowed_methods: :both,
                       selfsigned_callback: &selfsigned_certs/1,
                       pki_callback: &get_dn/1
 
