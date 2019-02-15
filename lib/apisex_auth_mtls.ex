@@ -333,7 +333,7 @@ defmodule APISexAuthMTLS do
        }}
     end
   rescue
-    e -> {:error, conn, %APISex.Authenticator.Unauthorized{
+    _ -> {:error, conn, %APISex.Authenticator.Unauthorized{
            authenticator: __MODULE__,
            reason: :unknown
        }}
