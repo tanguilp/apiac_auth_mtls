@@ -299,12 +299,7 @@ defmodule APISexAuthMTLS do
   end
 
   defp validate_self_signed_cert(conn, client_id, cert, opts) do
-    # TODO: could we not use X509 package to reduce vuln surface?
-    # looks like decoding cert info requires additional Erlang code:
-    # https://github.com/jshmrtn/phoenix-client-ssl/blob/master/lib/public_key_subject.erl
-
     peer_cert_subject_public_key_info = get_subject_public_key_info(cert)
-    IO.inspect(peer_cert_subject_public_key_info)
 
     registered_certs = opts[:selfsigned_callback].(client_id)
 
@@ -337,6 +332,11 @@ defmodule APISexAuthMTLS do
          reason: :selfsigned_no_cert_match
        }}
     end
+  rescue
+    e -> {:error, conn, %APISex.Authenticator.Unauthorized{
+           authenticator: __MODULE__,
+           reason: :unknown
+       }}
   end
 
   # destructuring cert, documentation:
