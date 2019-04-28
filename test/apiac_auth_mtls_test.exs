@@ -1,8 +1,8 @@
-defmodule APISexAuthMTLSTest do
+defmodule APIacAuthMTLSTest do
   # as we are using the registry for testing, we have to disable async
   # so as to avoir race conditions
   use ExUnit.Case, async: false
-  doctest APISexAuthMTLS
+  doctest APIacAuthMTLS
 
   defmodule PKICert do
     use TestPlug, allowed_methods: :pki, pki_callback: &TestHelperFunctions.test_dn/1
@@ -37,7 +37,7 @@ defmodule APISexAuthMTLSTest do
     peer_root_cert =
       X509.Certificate.self_signed(
         peer_root_private_key,
-        "/C=BZ/ST=MBH/L=Lorient/O=APISexAuthBearer/CN=test root CA peer certificate",
+        "/C=BZ/ST=MBH/L=Lorient/O=APIacAuthBearer/CN=test root CA peer certificate",
         template: :root_ca
       )
 
@@ -47,7 +47,7 @@ defmodule APISexAuthMTLSTest do
       peer_private_key
       |> X509.PublicKey.derive()
       |> X509.Certificate.new(
-        "/C=BZ/ST=MBH/L=Lorient/O=APISexAuthBearer/CN=test peer certificate",
+        "/C=BZ/ST=MBH/L=Lorient/O=APIacAuthBearer/CN=test peer certificate",
         peer_root_cert,
         peer_root_private_key
       )
@@ -57,7 +57,7 @@ defmodule APISexAuthMTLSTest do
     server_ca_cert =
       X509.Certificate.self_signed(
         server_ca_private_key,
-        "/C=RU/ST=SPB/L=SPB/O=APISexAuthBearer/CN=test server certificate",
+        "/C=RU/ST=SPB/L=SPB/O=APIacAuthBearer/CN=test server certificate",
         template: :root_ca
       )
 
@@ -86,8 +86,8 @@ defmodule APISexAuthMTLSTest do
       )
 
     assert elem(status, 1) == 200
-    assert Poison.decode!(body)["apisex_client"] == "testclient"
-    assert Poison.decode!(body)["apisex_authenticator"] == "Elixir.APISexAuthMTLS"
+    assert Poison.decode!(body)["apiac_client"] == "testclient"
+    assert Poison.decode!(body)["apiac_authenticator"] == "Elixir.APIacAuthMTLS"
   end
 
   test "invalid pki certificate", context do
@@ -96,7 +96,7 @@ defmodule APISexAuthMTLSTest do
     peer_root_cert =
       X509.Certificate.self_signed(
         peer_root_private_key,
-        "/C=BZ/ST=MBH/L=Lorient/O=APISexAuthBearer/CN=test root CA peer certificate",
+        "/C=BZ/ST=MBH/L=Lorient/O=APIacAuthBearer/CN=test root CA peer certificate",
         template: :root_ca
       )
 
@@ -106,7 +106,7 @@ defmodule APISexAuthMTLSTest do
       peer_private_key
       |> X509.PublicKey.derive()
       |> X509.Certificate.new(
-        "/C=BZ/ST=MBH/L=Lorient/O=APISexAuthBearer/CN=invalid DN",
+        "/C=BZ/ST=MBH/L=Lorient/O=APIacAuthBearer/CN=invalid DN",
         peer_root_cert,
         peer_root_private_key
       )
@@ -116,7 +116,7 @@ defmodule APISexAuthMTLSTest do
     server_ca_cert =
       X509.Certificate.self_signed(
         server_ca_private_key,
-        "/C=RU/ST=SPB/L=SPB/O=APISexAuthBearer/CN=test server certificate",
+        "/C=RU/ST=SPB/L=SPB/O=APIacAuthBearer/CN=test server certificate",
         template: :root_ca
       )
 
@@ -154,7 +154,7 @@ defmodule APISexAuthMTLSTest do
     peer_cert =
       X509.Certificate.self_signed(
         peer_private_key,
-        "/C=BZ/ST=MBH/L=Lorient/O=APISexAuthBearer/CN=test self-signed CA peer certificate",
+        "/C=BZ/ST=MBH/L=Lorient/O=APIacAuthBearer/CN=test self-signed CA peer certificate",
         template: :server
       )
 
@@ -165,7 +165,7 @@ defmodule APISexAuthMTLSTest do
     server_ca_cert =
       X509.Certificate.self_signed(
         server_ca_private_key,
-        "/C=RU/ST=SPB/L=SPB/O=APISexAuthBearer/CN=test server certificate",
+        "/C=RU/ST=SPB/L=SPB/O=APIacAuthBearer/CN=test server certificate",
         template: :root_ca,
         extensions: [subject_alt_name: X509.Certificate.Extension.subject_alt_name(["localhost"])]
       )
@@ -195,8 +195,8 @@ defmodule APISexAuthMTLSTest do
       )
 
     assert elem(status, 1) == 200
-    assert Poison.decode!(body)["apisex_client"] == "testclient"
-    assert Poison.decode!(body)["apisex_authenticator"] == "Elixir.APISexAuthMTLS"
+    assert Poison.decode!(body)["apiac_client"] == "testclient"
+    assert Poison.decode!(body)["apiac_authenticator"] == "Elixir.APIacAuthMTLS"
   end
 
   test "valid self-signed certificate (OTP certificate struct)", context do
@@ -205,7 +205,7 @@ defmodule APISexAuthMTLSTest do
     peer_cert =
       X509.Certificate.self_signed(
         peer_private_key,
-        "/C=BZ/ST=MBH/L=Lorient/O=APISexAuthBearer/CN=test self-signed CA peer certificate",
+        "/C=BZ/ST=MBH/L=Lorient/O=APIacAuthBearer/CN=test self-signed CA peer certificate",
         template: :server
       )
 
@@ -216,7 +216,7 @@ defmodule APISexAuthMTLSTest do
     server_ca_cert =
       X509.Certificate.self_signed(
         server_ca_private_key,
-        "/C=RU/ST=SPB/L=SPB/O=APISexAuthBearer/CN=test server certificate",
+        "/C=RU/ST=SPB/L=SPB/O=APIacAuthBearer/CN=test server certificate",
         template: :root_ca,
         extensions: [subject_alt_name: X509.Certificate.Extension.subject_alt_name(["localhost"])]
       )
@@ -246,8 +246,8 @@ defmodule APISexAuthMTLSTest do
       )
 
     assert elem(status, 1) == 200
-    assert Poison.decode!(body)["apisex_client"] == "testclient"
-    assert Poison.decode!(body)["apisex_authenticator"] == "Elixir.APISexAuthMTLS"
+    assert Poison.decode!(body)["apiac_client"] == "testclient"
+    assert Poison.decode!(body)["apiac_authenticator"] == "Elixir.APIacAuthMTLS"
   end
 
   test "invalid self-signed certificate", context do
@@ -256,7 +256,7 @@ defmodule APISexAuthMTLSTest do
     peer_cert =
       X509.Certificate.self_signed(
         peer_private_key,
-        "/C=BZ/ST=MBH/L=Lorient/O=APISexAuthBearer/CN=test self-signed CA peer certificate",
+        "/C=BZ/ST=MBH/L=Lorient/O=APIacAuthBearer/CN=test self-signed CA peer certificate",
         template: :server
       )
 
@@ -265,7 +265,7 @@ defmodule APISexAuthMTLSTest do
     invalid_peer_cert =
       X509.Certificate.self_signed(
         invalid_peer_private_key,
-        "/C=BZ/ST=MBH/L=Lorient/O=APISexAuthBearer/CN=test self-signed CA peer certificate",
+        "/C=BZ/ST=MBH/L=Lorient/O=APIacAuthBearer/CN=test self-signed CA peer certificate",
         template: :server
       )
 
@@ -276,7 +276,7 @@ defmodule APISexAuthMTLSTest do
     server_ca_cert =
       X509.Certificate.self_signed(
         server_ca_private_key,
-        "/C=RU/ST=SPB/L=SPB/O=APISexAuthBearer/CN=test server certificate",
+        "/C=RU/ST=SPB/L=SPB/O=APIacAuthBearer/CN=test server certificate",
         template: :root_ca,
         extensions: [subject_alt_name: X509.Certificate.Extension.subject_alt_name(["localhost"])]
       )

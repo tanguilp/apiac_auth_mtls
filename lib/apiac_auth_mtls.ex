@@ -1,9 +1,9 @@
-defmodule APISexAuthMTLS do
+defmodule APIacAuthMTLS do
   @behaviour Plug
-  @behaviour APISex.Authenticator
+  @behaviour APIac.Authenticator
 
   @moduledoc """
-  An `APISex.Authenticator` plug implementing
+  An `APIac.Authenticator` plug implementing
   [RFCXXXX](https://tools.ietf.org/html/draft-ietf-oauth-mtls-12)
   **section 2** of 'OAuth 2.0 Mutual TLS Client Authentication and Certificate
   Bound Access Tokens'
@@ -36,14 +36,14 @@ defmodule APISexAuthMTLS do
   is registered for that client. Certificates can be returned in DER-encoded format, or
   native OTP certificate structure
   - `set_error_response`: function called when authentication failed. Defaults to
-  `APISexAuthBasic.send_error_response/3`
+  `APIacAuthBasic.send_error_response/3`
   - `error_response_verbosity`: one of `:debug`, `:normal` or `:minimal`.
   Defaults to `:normal`
 
   ## Example
 
   ```elixir
-  plug APISexAuthBasic, allowed_methods: :both,
+  plug APIacAuthBasic, allowed_methods: :both,
                         selfsigned_callback: &selfsigned_certs/1,
                         pki_callback: &get_dn/1
 
@@ -185,14 +185,14 @@ defmodule APISexAuthMTLS do
 
     opts
     |> Enum.into(%{})
-    |> Map.put_new(:set_error_response, &APISexAuthMTLS.send_error_response/3)
+    |> Map.put_new(:set_error_response, &APIacAuthMTLS.send_error_response/3)
     |> Map.put_new(:error_response_verbosity, :normal)
   end
 
   @impl Plug
   @spec call(Plug.Conn.t(), Plug.opts()) :: Plug.Conn.t()
   def call(conn, %{} = opts) do
-    if APISex.authenticated?(conn) do
+    if APIac.authenticated?(conn) do
       conn
     else
       do_call(conn, opts)
@@ -204,19 +204,19 @@ defmodule APISexAuthMTLS do
          {:ok, conn} <- validate_credentials(conn, credentials, opts) do
       conn
     else
-      {:error, conn, %APISex.Authenticator.Unauthorized{} = error} ->
+      {:error, conn, %APIac.Authenticator.Unauthorized{} = error} ->
         opts[:set_error_response].(conn, error, opts)
     end
   end
 
   @doc """
-  `APISex.Authenticator` credential extractor callback
+  `APIac.Authenticator` credential extractor callback
 
   The returned credentials is a `{String.t, binary}` tuple where:
   - the first parameter is the `client_id`
   - the second parameter is the raw DER-encoded certificate
   """
-  @impl APISex.Authenticator
+  @impl APIac.Authenticator
   def extract_credentials(conn, _opts) do
     with {:ok, conn, client_id} <- get_client_id(conn),
          {:ok, ssl_cert} <- get_peer_cert(conn) do
@@ -224,7 +224,7 @@ defmodule APISexAuthMTLS do
     else
       {:error, conn, reason} ->
         {:error, conn,
-         %APISex.Authenticator.Unauthorized{authenticator: __MODULE__, reason: reason}}
+         %APIac.Authenticator.Unauthorized{authenticator: __MODULE__, reason: reason}}
     end
   end
 
@@ -264,11 +264,11 @@ defmodule APISexAuthMTLS do
   end
 
   @doc """
-  `APISex.Authenticator` credential validator callback
+  `APIac.Authenticator` credential validator callback
 
   The credentials parameter must be an `%X509.Certificate{}` struct
   """
-  @impl APISex.Authenticator
+  @impl APIac.Authenticator
   def validate_credentials(conn, {client_id, raw_tls_cert}, opts) do
     # not documented, but pkix_decode_cert/2 returns an {:error, reason} tuple
     case X509.Certificate.from_der(raw_tls_cert) do
@@ -289,7 +289,7 @@ defmodule APISexAuthMTLS do
             validate_pki_cert(conn, client_id, cert, opts)
           else
             {:error, conn,
-             %APISex.Authenticator.Unauthorized{
+             %APIac.Authenticator.Unauthorized{
                authenticator: __MODULE__,
                reason: :no_method_provided
              }}
@@ -321,19 +321,19 @@ defmodule APISexAuthMTLS do
     if public_key_info_match do
       conn =
         conn
-        |> Plug.Conn.put_private(:apisex_authenticator, __MODULE__)
-        |> Plug.Conn.put_private(:apisex_client, client_id)
+        |> Plug.Conn.put_private(:apiac_authenticator, __MODULE__)
+        |> Plug.Conn.put_private(:apiac_client, client_id)
 
       {:ok, conn}
     else
       {:error, conn,
-       %APISex.Authenticator.Unauthorized{
+       %APIac.Authenticator.Unauthorized{
          authenticator: __MODULE__,
          reason: :selfsigned_no_cert_match
        }}
     end
   rescue
-    _ -> {:error, conn, %APISex.Authenticator.Unauthorized{
+    _ -> {:error, conn, %APIac.Authenticator.Unauthorized{
            authenticator: __MODULE__,
            reason: :unknown
        }}
@@ -371,18 +371,18 @@ defmodule APISexAuthMTLS do
     if registered_client_cert_sdn_str == peer_cert_sdn_str do
       conn =
         conn
-        |> Plug.Conn.put_private(:apisex_authenticator, __MODULE__)
-        |> Plug.Conn.put_private(:apisex_client, client_id)
+        |> Plug.Conn.put_private(:apiac_authenticator, __MODULE__)
+        |> Plug.Conn.put_private(:apiac_client, client_id)
 
       {:ok, conn}
     else
       {:error, conn,
-       %APISex.Authenticator.Unauthorized{authenticator: __MODULE__, reason: :pki_no_dn_match}}
+       %APIac.Authenticator.Unauthorized{authenticator: __MODULE__, reason: :pki_no_dn_match}}
     end
   end
 
   @doc """
-  Implementation of the `APISex.Authenticator` callback
+  Implementation of the `APIac.Authenticator` callback
 
   ## Verbosity
 
@@ -391,12 +391,12 @@ defmodule APISexAuthMTLS do
 
   | Error response verbosity  | HTTP Status        | Headers | Body                                                    |
   |:-------------------------:|--------------------|---------|---------------------------------------------------------|
-  | `:debug`                  | Unauthorized (401) |         | `APISex.Authenticator.Unauthorized` exception's message |
+  | `:debug`                  | Unauthorized (401) |         | `APIac.Authenticator.Unauthorized` exception's message |
   | `:normal`                 | Unauthorized (401) |         |                                                         |
   | `:minimal`                | Unauthorized (401) |         |                                                         |
 
   """
-  @impl APISex.Authenticator
+  @impl APIac.Authenticator
   def send_error_response(conn, _error, %{:error_response_verbosity => error_response_verbosity})
       when error_response_verbosity in [:normal, :minimal] do
     conn
@@ -413,14 +413,14 @@ defmodule APISexAuthMTLS do
   @doc """
   Saves failure in a `Plug.Conn.t()`'s private field and returns the `conn`
 
-  See the `APISex.AuthFailureResponseData` module for more information.
+  See the `APIac.AuthFailureResponseData` module for more information.
   """
   @spec save_authentication_failure_response(Plug.Conn.t(),
-                                             %APISex.Authenticator.Unauthorized{},
+                                             %APIac.Authenticator.Unauthorized{},
                                              any()) :: Plug.Conn.t()
   def save_authentication_failure_response(conn, error, opts) do
     failure_response_data =
-      %APISex.AuthFailureResponseData{
+      %APIac.AuthFailureResponseData{
         module: __MODULE__,
         reason: error.reason,
         www_authenticate_header: nil,
@@ -433,6 +433,6 @@ defmodule APISexAuthMTLS do
           end
       }
 
-    APISex.AuthFailureResponseData.put(conn, failure_response_data)
+    APIac.AuthFailureResponseData.put(conn, failure_response_data)
   end
 end

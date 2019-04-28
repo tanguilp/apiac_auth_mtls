@@ -1,8 +1,8 @@
-# APISexAuthMTLS
+# APIacAuthMTLS
 
 ** WIP - do not use in prod env **
 
-An `APISex.Authenticator` plug implementing [RFCXXXX](https://tools.ietf.org/html/draft-ietf-oauth-mtls-12)
+An `APIac.Authenticator` plug implementing [RFCXXXX](https://tools.ietf.org/html/draft-ietf-oauth-mtls-12)
 **section 2** of 'OAuth 2.0 Mutual TLS Client Authentication and Certificate
 Bound Access Tokens'
 
@@ -21,6 +21,16 @@ Mutual TLS OAuth Client Authentication Method](https://tools.ietf.org/html/draft
 In this case, the certificate is checked against the **subject public key info**
 of the registered certificates of the `client_id`
 
+## Installation
+
+```elixir
+def deps do
+  [
+    {:apiac_auth_mtls, github: "tanguilp/apiac_auth_mtls", tag: "0.2.0"}
+  ]
+end
+```
+
 ## Plug options
 
 - `allowed_methods`: one of `:pki`, `:selfsigned` or `:both`. No default value,
@@ -34,14 +44,14 @@ or the list of the certificate for `the client_id`, or `nil` if no certificate
 is registered for that client. Certificates can be returned in DER-encoded format, or
 native OTP certificate structure
 - `set_error_response`: function called when authentication failed. Defaults to
-`APISexAuthBasic.send_error_response/3`
+`APIacAuthBasic.send_error_response/3`
 - `error_response_verbosity`: one of `:debug`, `:normal` or `:minimal`.
 Defaults to `:normal`
 
 ## Example
 
 ```elixir
-plug APISexAuthMTLS, allowed_methods: :both,
+plug APIacAuthMTLS, allowed_methods: :both,
                       selfsigned_callback: &selfsigned_certs/1,
                       pki_callback: &get_dn/1
 

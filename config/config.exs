@@ -10,11 +10,11 @@ use Mix.Config
 
 # You can configure your application as:
 #
-#     config :apisex_auth_mtls, key: :value
+#     config :apiac_auth_mtls, key: :value
 #
 # and access this configuration in your application as:
 #
-#     Application.get_env(:apisex_auth_mtls, :key)
+#     Application.get_env(:apiac_auth_mtls, :key)
 #
 # You can also configure a 3rd-party app:
 #
