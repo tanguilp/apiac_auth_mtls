@@ -8,6 +8,31 @@ defmodule APIacAuthMTLSTest do
     use TestPlug, allowed_methods: :pki, pki_callback: &TestHelperFunctions.test_dn/1
   end
 
+  defmodule PKIDNSCert do
+    use TestPlug, allowed_methods: :pki, pki_callback: &TestHelperFunctions.test_dns/1
+  end
+
+  defmodule PKIHeaderCert do
+    use TestPlug,
+      allowed_methods: :pki,
+      pki_callback: &TestHelperFunctions.test_dn/1,
+      cert_data_origin: {:header_cert, "X-SSL-CERT"}
+  end
+
+  defmodule PKIHeaderCertWithDNS do
+    use TestPlug,
+      allowed_methods: :pki,
+      pki_callback: &TestHelperFunctions.test_dns/1,
+      cert_data_origin: {:header_cert, "X-SSL-CERT"}
+  end
+
+  defmodule PKIHeaderValue do
+    use TestPlug,
+      allowed_methods: :pki,
+      pki_callback: &TestHelperFunctions.test_dn/1,
+      cert_data_origin: {:header_param, "ssl_client_i_dn"}
+  end
+
   defmodule SelfSignedCert do
     use TestPlug,
       allowed_methods: :selfsigned,
@@ -31,7 +56,7 @@ defmodule APIacAuthMTLSTest do
     [ref: ref]
   end
 
-  test "valid pki certificate", context do
+  test "valid pki certificate with DN validation", context do
     peer_root_private_key = X509.PrivateKey.new_ec(:secp256r1)
 
     peer_root_cert =
@@ -82,6 +107,225 @@ defmodule APIacAuthMTLSTest do
             key: {:ECPrivateKey, X509.PrivateKey.to_der(peer_private_key)}
           ]
         ],
+        []
+      )
+
+    assert elem(status, 1) == 200
+    assert Poison.decode!(body)["apiac_client"] == "testclient"
+    assert Poison.decode!(body)["apiac_authenticator"] == "Elixir.APIacAuthMTLS"
+  end
+
+  test "valid pki certificate with DNS name validation", context do
+    peer_root_private_key = X509.PrivateKey.new_ec(:secp256r1)
+
+    peer_root_cert =
+      X509.Certificate.self_signed(
+        peer_root_private_key,
+        "/C=BZ/ST=MBH/L=Lorient/O=APIacAuthBearer/CN=test root CA peer certificate",
+        template: :root_ca
+      )
+
+    peer_private_key = X509.PrivateKey.new_ec(:secp256r1)
+
+    extension = X509.Certificate.Extension.subject_alt_name(
+      ["www.example.com", "www.example.org", "www.example.br"]
+    )
+
+    peer_cert =
+      peer_private_key
+      |> X509.PublicKey.derive()
+      |> X509.Certificate.new(
+        "/C=BZ/ST=MBH/L=Lorient/O=APIacAuthBearer/CN=test peer certificate",
+        peer_root_cert,
+        peer_root_private_key,
+        extensions: [subject_alt_name: extension]
+      )
+
+    server_ca_private_key = X509.PrivateKey.new_ec(:secp256r1)
+
+    server_ca_cert =
+      X509.Certificate.self_signed(
+        server_ca_private_key,
+        "/C=RU/ST=SPB/L=SPB/O=APIacAuthBearer/CN=test server certificate",
+        template: :root_ca
+      )
+
+    Plug.Cowboy.https(PKIDNSCert, [],
+      port: 8443,
+      ref: context[:ref],
+      cert: X509.Certificate.to_der(server_ca_cert),
+      cacerts: [X509.Certificate.to_der(peer_root_cert)],
+      key: {:ECPrivateKey, X509.PrivateKey.to_der(server_ca_private_key)},
+      verify: :verify_peer
+    )
+
+    {:ok, {status, _headers, body}} =
+      :httpc.request(
+        :post,
+        {'https://localhost:8443', [], 'application/x-www-form-urlencoded',
+         'client_id=testclient'},
+        [
+          ssl: [
+            cacerts: [X509.Certificate.to_der(server_ca_cert)],
+            cert: X509.Certificate.to_der(peer_cert),
+            key: {:ECPrivateKey, X509.PrivateKey.to_der(peer_private_key)}
+          ]
+        ],
+        []
+      )
+
+    assert elem(status, 1) == 200
+    assert Poison.decode!(body)["apiac_client"] == "testclient"
+    assert Poison.decode!(body)["apiac_authenticator"] == "Elixir.APIacAuthMTLS"
+  end
+
+  test "valid pki certificate, cert in header", context do
+    peer_root_private_key = X509.PrivateKey.new_ec(:secp256r1)
+
+    peer_root_cert =
+      X509.Certificate.self_signed(
+        peer_root_private_key,
+        "/C=BZ/ST=MBH/L=Lorient/O=APIacAuthBearer/CN=test root CA peer certificate",
+        template: :root_ca
+      )
+
+    peer_private_key = X509.PrivateKey.new_ec(:secp256r1)
+
+    peer_cert =
+      peer_private_key
+      |> X509.PublicKey.derive()
+      |> X509.Certificate.new(
+        "/C=BZ/ST=MBH/L=Lorient/O=APIacAuthBearer/CN=test peer certificate",
+        peer_root_cert,
+        peer_root_private_key
+      )
+
+    server_ca_private_key = X509.PrivateKey.new_ec(:secp256r1)
+
+    server_ca_cert =
+      X509.Certificate.self_signed(
+        server_ca_private_key,
+        "/C=RU/ST=SPB/L=SPB/O=APIacAuthBearer/CN=test server certificate",
+        template: :root_ca
+      )
+
+    Plug.Cowboy.https(PKIHeaderCert, [],
+      port: 8443,
+      ref: context[:ref],
+      cert: X509.Certificate.to_der(server_ca_cert),
+      cacerts: [X509.Certificate.to_der(peer_root_cert)],
+      key: {:ECPrivateKey, X509.PrivateKey.to_der(server_ca_private_key)}
+    )
+
+    {:ok, {status, _headers, body}} =
+      :httpc.request(
+        :post,
+        {
+          'https://localhost:8443',
+          [{'X-SSL-CERT', peer_cert |> X509.Certificate.to_pem() |> String.to_charlist()}],
+          'application/x-www-form-urlencoded',
+          'client_id=testclient'
+        },
+        [ssl: [cacerts: [X509.Certificate.to_der(server_ca_cert)]]],
+        []
+      )
+
+    assert elem(status, 1) == 200
+    assert Poison.decode!(body)["apiac_client"] == "testclient"
+    assert Poison.decode!(body)["apiac_authenticator"] == "Elixir.APIacAuthMTLS"
+  end
+
+  test "valid pki certificate, param in header", context do
+    server_ca_private_key = X509.PrivateKey.new_ec(:secp256r1)
+
+    server_ca_cert =
+      X509.Certificate.self_signed(
+        server_ca_private_key,
+        "/C=RU/ST=SPB/L=SPB/O=APIacAuthBearer/CN=test server certificate",
+        template: :root_ca
+      )
+
+    Plug.Cowboy.https(PKIHeaderValue, [],
+      port: 8443,
+      ref: context[:ref],
+      cert: X509.Certificate.to_der(server_ca_cert),
+      key: {:ECPrivateKey, X509.PrivateKey.to_der(server_ca_private_key)}
+    )
+
+    {:ok, {status, _headers, body}} =
+      :httpc.request(
+        :post,
+        {
+          'https://localhost:8443',
+          [
+            {'ssl_client_i_dn',
+              TestHelperFunctions.test_dn("app_client_id") |> String.to_charlist()
+            }
+          ],
+          'application/x-www-form-urlencoded',
+          'client_id=testclient'
+        },
+        [ssl: [cacerts: [X509.Certificate.to_der(server_ca_cert)]]],
+        []
+      )
+
+    assert elem(status, 1) == 200
+    assert Poison.decode!(body)["apiac_client"] == "testclient"
+    assert Poison.decode!(body)["apiac_authenticator"] == "Elixir.APIacAuthMTLS"
+  end
+
+  test "valid pki certificate, cert in header and DNS SAN check", context do
+    peer_root_private_key = X509.PrivateKey.new_ec(:secp256r1)
+
+    peer_root_cert =
+      X509.Certificate.self_signed(
+        peer_root_private_key,
+        "/C=BZ/ST=MBH/L=Lorient/O=APIacAuthBearer/CN=test root CA peer certificate",
+        template: :root_ca
+      )
+
+    peer_private_key = X509.PrivateKey.new_ec(:secp256r1)
+
+    extension = X509.Certificate.Extension.subject_alt_name(
+      ["www.example.com", "www.example.org", "www.example.br"]
+    )
+
+    peer_cert =
+      peer_private_key
+      |> X509.PublicKey.derive()
+      |> X509.Certificate.new(
+        "/C=BZ/ST=MBH/L=Lorient/O=APIacAuthBearer/CN=test peer certificate",
+        peer_root_cert,
+        peer_root_private_key,
+        extensions: [subject_alt_name: extension]
+      )
+
+    server_ca_private_key = X509.PrivateKey.new_ec(:secp256r1)
+
+    server_ca_cert =
+      X509.Certificate.self_signed(
+        server_ca_private_key,
+        "/C=RU/ST=SPB/L=SPB/O=APIacAuthBearer/CN=test server certificate",
+        template: :root_ca
+      )
+
+    Plug.Cowboy.https(PKIHeaderCertWithDNS, [],
+      port: 8443,
+      ref: context[:ref],
+      cert: X509.Certificate.to_der(server_ca_cert),
+      key: {:ECPrivateKey, X509.PrivateKey.to_der(server_ca_private_key)}
+    )
+
+    {:ok, {status, _headers, body}} =
+      :httpc.request(
+        :post,
+        {
+          'https://localhost:8443',
+          [{'X-SSL-CERT', peer_cert |> X509.Certificate.to_pem() |> String.to_charlist()}],
+          'application/x-www-form-urlencoded',
+          'client_id=testclient'
+        },
+        [ssl: [cacerts: [X509.Certificate.to_der(server_ca_cert)]]],
         []
       )
 

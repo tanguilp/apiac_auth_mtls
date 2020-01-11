@@ -2,9 +2,8 @@
 
 ** WIP - do not use in prod env **
 
-An `APIac.Authenticator` plug implementing [RFCXXXX](https://tools.ietf.org/html/draft-ietf-oauth-mtls-12)
-**section 2** of 'OAuth 2.0 Mutual TLS Client Authentication and Certificate
-Bound Access Tokens'
+An `APIac.Authenticator` plug implementing **section 2** of
+[OAuth 2.0 Mutual-TLS Client Authentication and Certificate-Bound Access Tokens](https://tools.ietf.org/html/draft-ietf-oauth-mtls-17)
 
 Using this scheme, authentication is performed thanks to 2 elements:
 - TLS client certificate authentication
@@ -33,19 +32,34 @@ end
 
 ## Plug options
 
-- `allowed_methods`: one of `:pki`, `:selfsigned` or `:both`. No default value,
+- `:allowed_methods`: one of `:pki`, `:selfsigned` or `:both`. No default value,
 mandatory option
-- `pki_callback`: a `(String.t -> String.t | nil)` function that takes the `client_id` as
-a parameter and returns its DN as a `String.t` or `nil` if no DN is registered for
-that client
-- `selfsigned_callback`: a `(String.t -> binary() | [binary()] | nil)`
+- `:pki_callback`: a
+`(String.t -> String.t | {tls_client_auth_subject_value(), String.t()} | nil)`
+function that takes the `client_id` as a parameter and returns its DN as a `String.t()` or
+`{tls_client_auth_subject_value(), String.t()}` or `nil` if no DN is registered for
+that client. When no `t:tls_client_auth_subject_value/0` is specified, defaults to
+`:tls_client_auth_subject_dn`
+- `:selfsigned_callback`: a `(String.t -> binary() | [binary()] | nil)`
 function that takes the `client_id` as a parameter and returns the certificate
 or the list of the certificate for `the client_id`, or `nil` if no certificate
 is registered for that client. Certificates can be returned in DER-encoded format, or
 native OTP certificate structure
-- `set_error_response`: function called when authentication failed. Defaults to
+- `:cert_data_origin`: origin of the peer cert data. Can be set to:
+  - `:native`: the peer certificate data is retrieved from the connection. Only works when
+  this plug is used at the TLS termination endpoint. This is the *default value*
+  - `{:header_param, "Header-Name"}`: the peer certificate data, and more specifically the
+  parameter upon which the decision is to be made, is retrieved from an HTTP header. When
+  using this feature, **make sure** that this header is filtered by a n upstream system
+  (reverse-proxy...) so that malicious users cannot inject the value themselves. For instance,
+  the configuration could be set to: `{:header_param, "SSL_CLIENT_DN"}`. If there are several
+  values for the parameter (for instance several `dNSName`), they must be sent in
+  separate headers. Not compatible with self-signed certiticate authentication
+  - `{:header_cert, "Header-Name"}`: the whole certificate us forwarded in the "Header-Name"
+  and retrieved by this plug. The certificate must be a PEM-encoded value
+- `:set_error_response`: function called when authentication failed. Defaults to
 `APIacAuthBasic.send_error_response/3`
-- `error_response_verbosity`: one of `:debug`, `:normal` or `:minimal`.
+- `:error_response_verbosity`: one of `:debug`, `:normal` or `:minimal`.
 Defaults to `:normal`
 
 ## Example

@@ -29,9 +29,9 @@ defmodule APIacAuthMTLS.MixProject do
       {:plug, "~> 1.0"},
       {:apiac, github: "tanguilp/apiac", tag: "0.3.0"},
       {:oauth2_utils, github: "tanguilp/oauth2_utils", tag: "master"},
-      {:x509, "~> 0.4.0"},
+      {:x509, "~> 0.8.0"},
       {:plug_cowboy, "~> 2.0", only: :test},
-      {:poison, "~> 3.1", only: :test},
+      {:poison, "~> 4.0", only: :test},
       {:dialyxir, "~> 1.0.0-rc.4", only: [:dev], runtime: false},
       {:ex_doc, "~> 0.19", only: :dev, runtime: false}
     ]

@@ -3,10 +3,8 @@ defmodule APIacAuthMTLS do
   @behaviour APIac.Authenticator
 
   @moduledoc """
-  An `APIac.Authenticator` plug implementing
-  [RFCXXXX](https://tools.ietf.org/html/draft-ietf-oauth-mtls-12)
-  **section 2** of 'OAuth 2.0 Mutual TLS Client Authentication and Certificate
-  Bound Access Tokens'
+  An `APIac.Authenticator` plug implementing **section 2** of
+  [OAuth 2.0 Mutual-TLS Client Authentication and Certificate-Bound Access Tokens](https://tools.ietf.org/html/draft-ietf-oauth-mtls-17)
 
   Using this scheme, authentication is performed thanks to 2 elements:
   - TLS client certificate authentication
@@ -25,19 +23,34 @@ defmodule APIacAuthMTLS do
 
   ## Plug options
 
-  - `allowed_methods`: one of `:pki`, `:selfsigned` or `:both`. No default value,
+  - `:allowed_methods`: one of `:pki`, `:selfsigned` or `:both`. No default value,
   mandatory option
-  - `pki_callback`: a `(String.t -> String.t | nil)` function that takes the `client_id` as
-  a parameter and returns its DN as a `String.t` or `nil` if no DN is registered for
-  that client
-  - `selfsigned_callback`: a `(String.t -> binary() | [binary()] | nil)`
+  - `:pki_callback`: a
+  `(String.t -> String.t | {tls_client_auth_subject_value(), String.t()} | nil)`
+  function that takes the `client_id` as a parameter and returns its DN as a `String.t()` or
+  `{tls_client_auth_subject_value(), String.t()}` or `nil` if no DN is registered for
+  that client. When no `t:tls_client_auth_subject_value/0` is specified, defaults to
+  `:tls_client_auth_subject_dn`
+  - `:selfsigned_callback`: a `(String.t -> binary() | [binary()] | nil)`
   function that takes the `client_id` as a parameter and returns the certificate
   or the list of the certificate for `the client_id`, or `nil` if no certificate
   is registered for that client. Certificates can be returned in DER-encoded format, or
   native OTP certificate structure
-  - `set_error_response`: function called when authentication failed. Defaults to
+  - `:cert_data_origin`: origin of the peer cert data. Can be set to:
+    - `:native`: the peer certificate data is retrieved from the connection. Only works when
+    this plug is used at the TLS termination endpoint. This is the *default value*
+    - `{:header_param, "Header-Name"}`: the peer certificate data, and more specifically the
+    parameter upon which the decision is to be made, is retrieved from an HTTP header. When
+    using this feature, **make sure** that this header is filtered by a n upstream system
+    (reverse-proxy...) so that malicious users cannot inject the value themselves. For instance,
+    the configuration could be set to: `{:header_param, "SSL_CLIENT_DN"}`. If there are several
+    values for the parameter (for instance several `dNSName`), they must be sent in
+    separate headers. Not compatible with self-signed certiticate authentication
+    - `{:header_cert, "Header-Name"}`: the whole certificate us forwarded in the "Header-Name"
+    and retrieved by this plug. The certificate must be a PEM-encoded value
+  - `:set_error_response`: function called when authentication failed. Defaults to
   `APIacAuthBasic.send_error_response/3`
-  - `error_response_verbosity`: one of `:debug`, `:normal` or `:minimal`.
+  - `:error_response_verbosity`: one of `:debug`, `:normal` or `:minimal`.
   Defaults to `:normal`
 
   ## Example
@@ -76,7 +89,6 @@ defmodule APIacAuthMTLS do
   The list of CAs can be changed through configuration.
 
   Note that by default, the Erlang TLS stack does not accept self-signed certificate.
-  FIXME: what is the rationale?
 
   All TLS options are documented in the
   [Erlang SSL module documentation](http://erlang.org/doc/man/ssl.html).
@@ -94,6 +106,7 @@ defmodule APIacAuthMTLS do
   ### Example with `plug_cowboy`
 
   To enable optional TLS client authentication:
+
   ```elixir
   Plug.Cowboy.https(MyPlug, [],
                     port: 8443,
@@ -103,6 +116,7 @@ defmodule APIacAuthMTLS do
   ```
 
   To enable mandatory TLS client authentication:
+
   ```elixir
   Plug.Cowboy.https(MyPlug, [],
                     port: 8443,
@@ -145,8 +159,6 @@ defmodule APIacAuthMTLS do
                     verify_fun: {&verify_fun_selfsigned_cert/3, []})
   ```
 
-  FIXME: what are the security implications of doing that?
-
   ## Security considerations
 
   In addition to the security considerations listed in the RFC, consider that:
@@ -165,6 +177,13 @@ defmodule APIacAuthMTLS do
   API access).
 
   """
+
+  @type tls_client_auth_subject_value ::
+  :tls_client_auth_subject_dn
+  | :tls_client_auth_san_dns
+  | :tls_client_auth_san_uri
+  | :tls_client_auth_san_ip
+  | :tls_client_auth_san_email
 
   @impl Plug
   def init(opts) do
@@ -185,6 +204,7 @@ defmodule APIacAuthMTLS do
 
     opts
     |> Enum.into(%{})
+    |> Map.put_new(:cert_data_origin, :native)
     |> Map.put_new(:set_error_response, &APIacAuthMTLS.send_error_response/3)
     |> Map.put_new(:error_response_verbosity, :normal)
   end
@@ -217,10 +237,10 @@ defmodule APIacAuthMTLS do
   - the second parameter is the raw DER-encoded certificate
   """
   @impl APIac.Authenticator
-  def extract_credentials(conn, _opts) do
+  def extract_credentials(conn, opts) do
     with {:ok, conn, client_id} <- get_client_id(conn),
-         {:ok, ssl_cert} <- get_peer_cert(conn) do
-      {:ok, conn, {client_id, ssl_cert}}
+         {:ok, creds} <- do_extract_credentials(conn, opts) do
+      {:ok, conn, {client_id, creds}}
     else
       {:error, conn, reason} ->
         {:error, conn,
@@ -228,38 +248,66 @@ defmodule APIacAuthMTLS do
     end
   end
 
+  defp get_client_id(%Plug.Conn{body_params: %Plug.Conn.Unfetched{}} = conn) do
+    plug_parser_opts =
+      Plug.Parsers.init(
+        parsers: [:urlencoded],
+        pass: ["application/x-www-form-urlencoded"]
+      )
+
+    conn
+    |> Plug.Parsers.call(plug_parser_opts)
+    |> get_client_id()
+  rescue
+    UnsupportedMediaTypeError ->
+      {:error, conn, :unsupported_media_type}
+  end
+
   defp get_client_id(conn) do
-    try do
-      plug_parser_opts =
-        Plug.Parsers.init(
-          parsers: [:urlencoded],
-          pass: ["application/x-www-form-urlencoded"]
-        )
+    client_id = conn.body_params["client_id"]
 
-      conn = Plug.Parsers.call(conn, plug_parser_opts)
-
-      client_id = conn.body_params["client_id"]
-
-      if client_id != nil and OAuth2Utils.valid_client_id_param?(client_id) do
-        {:ok, conn, client_id}
-      else
+    cond do
+      client_id == nil ->
         {:error, conn, :credentials_not_found}
-      end
-    rescue
-      UnsupportedMediaTypeError ->
-        {:error, conn, :unsupported_media_type}
+
+      OAuth2Utils.valid_client_id_param?(client_id) == false ->
+        {:error, conn, :invalid_client_id}
+
+      true ->
+        {:ok, conn, client_id}
     end
   end
 
-  defp get_peer_cert(conn) do
-    raw_tls_cert = Plug.Conn.get_peer_data(conn)[:ssl_cert]
-
-    case raw_tls_cert do
+  defp do_extract_credentials(conn, %{cert_data_origin: :native}) do
+    case Plug.Conn.get_peer_data(conn)[:ssl_cert] do
       nil ->
         {:error, conn, :no_client_cert_authentication}
 
       raw_tls_cert ->
-        {:ok, raw_tls_cert}
+        {:ok, X509.Certificate.from_der!(raw_tls_cert)}
+    end
+  end
+
+  defp do_extract_credentials(conn, %{cert_data_origin: {:header_param, header_name}}) do
+    case Plug.Conn.get_req_header(conn, header_name) do
+      [] ->
+        {:error, conn, :no_header_value}
+
+      headers ->
+        {:ok, headers}
+    end
+  end
+
+  defp do_extract_credentials(conn, %{cert_data_origin: {:header_cert, header_name}}) do
+    case Plug.Conn.get_req_header(conn, String.downcase(header_name)) do
+      [] ->
+        {:error, conn, :no_cert_header_value}
+
+      [pem_cert] ->
+        X509.Certificate.from_pem(pem_cert)
+
+      [_ | _] ->
+        {:error, conn, :multiple_certs_in_header}
     end
   end
 
@@ -269,52 +317,85 @@ defmodule APIacAuthMTLS do
   The credentials parameter must be an `%X509.Certificate{}` struct
   """
   @impl APIac.Authenticator
-  def validate_credentials(conn, {client_id, raw_tls_cert}, opts) do
-    # not documented, but pkix_decode_cert/2 returns an {:error, reason} tuple
-    case X509.Certificate.from_der(raw_tls_cert) do
-      {:error, _} ->
-        {:error, conn, :cert_decode_error}
+  def validate_credentials(conn, {client_id, {:OTPCertificate, _, _, _} = cert}, opts) do
+    # technically a root CA certificate is also self-signed, however it
+    # 1- is absolutely unlikely it would be used for that
+    # 2- wouldn't have the same public key info, so couldn't impersonate
+    # another client
+    # TODO: confirm these assumptions
+    if :public_key.pkix_is_self_signed(cert) and
+         opts[:allowed_methods] in [:selfsigned, :both] do
+      validate_self_signed_cert(conn, client_id, cert, opts)
+    else
+      if opts[:allowed_methods] in [:pki, :both] do
+        validate_pki_cert(conn, client_id, cert, opts)
+      else
+        {:error, conn,
+         %APIac.Authenticator.Unauthorized{
+           authenticator: __MODULE__,
+           reason: :no_method_provided
+         }}
+      end
+    end
+  end
 
-      {:ok, cert} ->
-        # technically a root CA certificate is also self-signed, however it
-        # 1- is absolutely unlikely it would be used for that
-        # 2- wouldn't have the same public key info, so couldn't impersonate
-        # another client
-        # TODO: confirm these assumptions
-        if :public_key.pkix_is_self_signed(cert) and
-             opts[:allowed_methods] in [:selfsigned, :both] do
-          validate_self_signed_cert(conn, client_id, cert, opts)
-        else
-          if opts[:allowed_methods] in [:pki, :both] do
-            validate_pki_cert(conn, client_id, cert, opts)
-          else
-            {:error, conn,
-             %APIac.Authenticator.Unauthorized{
-               authenticator: __MODULE__,
-               reason: :no_method_provided
-             }}
-          end
-        end
+  def validate_credentials(_conn, {_client_id, header_values}, %{allowed_methods: :selfsigned})
+    when is_list(header_values)
+  do
+    raise ~s({:header_param, "Header-Name} is unsupported for self-signed certificates)
+  end
+
+  def validate_credentials(conn, {client_id, header_values}, opts) when is_list(header_values) do
+    case opts[:pki_callback].(client_id) do
+      {_tls_client_auth_subject_value_parameter, expected} ->
+        expected in header_values
+
+      expected when is_binary(expected) ->
+        expected in header_values
+
+      nil ->
+        false
+    end
+    |> if do
+      conn =
+        conn
+        |> Plug.Conn.put_private(:apiac_authenticator, __MODULE__)
+        |> Plug.Conn.put_private(:apiac_client, client_id)
+
+      {:ok, conn}
+    else
+      {:error, conn,
+       %APIac.Authenticator.Unauthorized{authenticator: __MODULE__, reason: :pki_no_match}}
     end
   end
 
   defp validate_self_signed_cert(conn, client_id, cert, opts) do
-    peer_cert_subject_public_key_info = get_subject_public_key_info(cert)
+    peer_cert_subject_public_key= X509.Certificate.public_key(cert)
 
-    registered_certs = opts[:selfsigned_callback].(client_id)
+    registered_certs =
+      case opts[:selfsigned_callback].(client_id) do
+        nil ->
+          []
+
+        [_ | _] = certs ->
+          certs
+
+        cert ->
+          [cert]
+      end
 
     public_key_info_match =
       Enum.any?(
-        if is_list(registered_certs) do
-          registered_certs
-        else
-          # when only one cert is returned, or nil was returned
-          [registered_certs]
-        end,
+        registered_certs,
         fn registered_cert ->
-          # FIXME: is that ok to compare nested struct like this?
-          # should we pattern match with = instead?
-          get_subject_public_key_info(registered_cert) == peer_cert_subject_public_key_info
+          case registered_cert do
+            {:OTPCertificate, _, _, _} ->
+              registered_cert
+
+            der_cert when is_binary(der_cert) ->
+              X509.Certificate.from_der!(der_cert)
+          end
+          |> X509.Certificate.public_key() == peer_cert_subject_public_key
         end
       )
 
@@ -339,36 +420,18 @@ defmodule APIacAuthMTLS do
        }}
   end
 
-  # destructuring cert, documentation:
-  # http://erlang.org/documentation/doc-6.2/lib/public_key-0.22.1/doc/html/cert_records.html
-  defp get_subject_public_key_info(
-         {:OTPCertificate, tbsCertificate, _signatureAlgorithm, _signature}
-       ) do
-    {:OTPTBSCertificate, _version, _serialNumber, _signature, _issuer, _validity, _subject,
-     subjectPublicKeyInfo, _issuerUniqueID, _subjectUniqueID, _extensions} = tbsCertificate
-
-    subjectPublicKeyInfo
-  end
-
-  defp get_subject_public_key_info(der_encoded_cert) do
-    X509.Certificate.from_der!(der_encoded_cert)
-    |> get_subject_public_key_info()
-  end
-
   defp validate_pki_cert(conn, client_id, cert, opts) do
-    registered_client_cert_sdn_str = opts[:pki_callback].(client_id)
+    case opts[:pki_callback].(client_id) do
+      {tls_client_auth_subject_value_parameter, parameter_value} ->
+        do_validate_pki_cert(tls_client_auth_subject_value_parameter, cert, parameter_value)
 
-    peer_cert_sdn_str =
-      cert
-      |> X509.Certificate.subject()
-      |> X509.RDNSequence.to_string()
+      parameter_value when is_binary(parameter_value) ->
+        do_validate_pki_cert(:tls_client_auth_subject_dn, cert, parameter_value)
 
-    # FIXME: is comparing string representations of this DNs ok on a security
-    # point of view? Or shall we compare the raw SDNs?
-    # See further https://tools.ietf.org/html/rfc5280#section-7.1
-    # FIXME: registered_client_cert can be `nil` Can a certificate's DN
-    # be `nil` too?
-    if registered_client_cert_sdn_str == peer_cert_sdn_str do
+      _ ->
+        false
+    end
+    |> if do
       conn =
         conn
         |> Plug.Conn.put_private(:apiac_authenticator, __MODULE__)
@@ -377,7 +440,38 @@ defmodule APIacAuthMTLS do
       {:ok, conn}
     else
       {:error, conn,
-       %APIac.Authenticator.Unauthorized{authenticator: __MODULE__, reason: :pki_no_dn_match}}
+       %APIac.Authenticator.Unauthorized{authenticator: __MODULE__, reason: :pki_no_match}}
+    end
+  end
+
+  defp do_validate_pki_cert(:tls_client_auth_subject_dn, cert, dn) do
+    # FIXME: is comparing string representations of this DNs ok on a security
+    # point of view? Or shall we compare the raw SDNs?
+    # See further https://tools.ietf.org/html/rfc5280#section-7.1
+    cert
+    |> X509.Certificate.subject()
+    |> X509.RDNSequence.to_string() == dn
+  end
+
+  defp do_validate_pki_cert(tls_client_auth_subject_value_parameter, cert, param_value) do
+    san_key =
+      case tls_client_auth_subject_value_parameter do
+        :tls_client_auth_san_dns -> :dNSName
+        :tls_client_auth_san_uri -> :uniformResourceIdentifier
+        :tls_client_auth_san_ip -> :iPAddress
+        :tls_client_auth_san_email -> :rfc822Name
+      end
+
+    cert
+    |> X509.Certificate.extension(:subject_alt_name)
+    |> case do
+      nil ->
+        false
+
+      {:Extension, {2, 5, 29, 17}, false, values} ->
+        values
+        |> Enum.filter(fn {k, _v} -> k == san_key end)
+        |> Enum.any?(fn {_k, v} -> param_value == List.to_string(v) end)
     end
   end
 
