@@ -10,13 +10,17 @@ Using this scheme, authentication is performed thanks to 2 elements:
 - the `client_id` parameter of the `application/x-www-form-urlencoded` body
 
 TLS client certificate authentication may be performed thanks to two methods:
-- authentication with
-a certificate issued by a Certificate Authority (CA) which is called [PKI
-Mutual TLS OAuth Client Authentication Method](https://tools.ietf.org/html/draft-ietf-oauth-mtls-12#section-2.1).
-In this case, the certificate **Distinguished Name** (DN) is checked against
-the DN registered for the `client_id`
+- authentication with a certificate issued by a Certificate Authority (CA) which is called
+[PKI Mutual TLS OAuth Client Authentication Method](https://tools.ietf.org/html/draft-ietf-oauth-mtls-17#section-2.1).
+In this case, one of the following certificate attribute is checked against
+this attribute registered for the `client_id`:
+  - Distinguished name
+  - SAN DNS
+  - SAN URI
+  - SAN IP address
+  - SAN email
 - authentication with a self-signed, self-issued certificate which is called [Self-Signed Certificate
-Mutual TLS OAuth Client Authentication Method](https://tools.ietf.org/html/draft-ietf-oauth-mtls-12#section-2.2).
+Mutual TLS OAuth Client Authentication Method](https://tools.ietf.org/html/draft-ietf-oauth-mtls-17#section-2.2).
 In this case, the certificate is checked against the **subject public key info**
 of the registered certificates of the `client_id`
 
@@ -55,8 +59,13 @@ native OTP certificate structure
   the configuration could be set to: `{:header_param, "SSL_CLIENT_DN"}`. If there are several
   values for the parameter (for instance several `dNSName`), they must be sent in
   separate headers. Not compatible with self-signed certiticate authentication
-  - `{:header_cert, "Header-Name"}`: the whole certificate us forwarded in the "Header-Name"
-  and retrieved by this plug. The certificate must be a PEM-encoded value
+  - `:header_cert`: the whole certificate is forwarded in the `"Client-Cert"` HTTP header
+  as a Base64 encoded value of the certificate's DER serialization, in conformance with
+  [Client-Cert HTTP Header: Conveying Client Certificate Information from TLS Terminating Reverse Proxies to Origin Server Applications (draft-bdc-something-something-certificate-01)](https://tools.ietf.org/html/draft-bdc-something-something-certificate-01)
+  - `{:header_cert, "Header-Name"}`: the whole certificate is forwarded in the
+  "Header-Name" HTTP header as a Base64 encoded value of the certificate's DER serialization
+  - `{:header_cert_pem, "Header-Name"}`: the whole certificate is forwarded in the
+  "Header-Name" as a PEM-encoded string and retrieved by this plug
 - `:set_error_response`: function called when authentication failed. Defaults to
 `APIacAuthBasic.send_error_response/3`
 - `:error_response_verbosity`: one of `:debug`, `:normal` or `:minimal`.
@@ -65,7 +74,7 @@ Defaults to `:normal`
 ## Example
 
 ```elixir
-plug APIacAuthMTLS, allowed_methods: :both,
+plug APIacAuthBasic, allowed_methods: :both,
                       selfsigned_callback: &selfsigned_certs/1,
                       pki_callback: &get_dn/1
 

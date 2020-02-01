@@ -11,13 +11,17 @@ defmodule APIacAuthMTLS do
   - the `client_id` parameter of the `application/x-www-form-urlencoded` body
 
   TLS client certificate authentication may be performed thanks to two methods:
-  - authentication with
-  a certificate issued by a Certificate Authority (CA) which is called [PKI
-  Mutual TLS OAuth Client Authentication Method](https://tools.ietf.org/html/draft-ietf-oauth-mtls-12#section-2.1).
-  In this case, the certificate **Distinguished Name** (DN) is checked against
-  the DN registered for the `client_id`
+  - authentication with a certificate issued by a Certificate Authority (CA) which is called
+  [PKI Mutual TLS OAuth Client Authentication Method](https://tools.ietf.org/html/draft-ietf-oauth-mtls-17#section-2.1).
+  In this case, one of the following certificate attribute is checked against
+  this attribute registered for the `client_id`:
+    - Distinguished name
+    - SAN DNS
+    - SAN URI
+    - SAN IP address
+    - SAN email
   - authentication with a self-signed, self-issued certificate which is called [Self-Signed Certificate
-  Mutual TLS OAuth Client Authentication Method](https://tools.ietf.org/html/draft-ietf-oauth-mtls-12#section-2.2).
+  Mutual TLS OAuth Client Authentication Method](https://tools.ietf.org/html/draft-ietf-oauth-mtls-17#section-2.2).
   In this case, the certificate is checked against the **subject public key info**
   of the registered certificates of the `client_id`
 
@@ -46,8 +50,13 @@ defmodule APIacAuthMTLS do
     the configuration could be set to: `{:header_param, "SSL_CLIENT_DN"}`. If there are several
     values for the parameter (for instance several `dNSName`), they must be sent in
     separate headers. Not compatible with self-signed certiticate authentication
-    - `{:header_cert, "Header-Name"}`: the whole certificate us forwarded in the "Header-Name"
-    and retrieved by this plug. The certificate must be a PEM-encoded value
+    - `:header_cert`: the whole certificate is forwarded in the `"Client-Cert"` HTTP header
+    as a Base64 encoded value of the certificate's DER serialization, in conformance with
+    [Client-Cert HTTP Header: Conveying Client Certificate Information from TLS Terminating Reverse Proxies to Origin Server Applications (draft-bdc-something-something-certificate-01)](https://tools.ietf.org/html/draft-bdc-something-something-certificate-01)
+    - `{:header_cert, "Header-Name"}`: the whole certificate is forwarded in the
+    "Header-Name" HTTP header as a Base64 encoded value of the certificate's DER serialization
+    - `{:header_cert_pem, "Header-Name"}`: the whole certificate is forwarded in the
+    "Header-Name" as a PEM-encoded string and retrieved by this plug
   - `:set_error_response`: function called when authentication failed. Defaults to
   `APIacAuthBasic.send_error_response/3`
   - `:error_response_verbosity`: one of `:debug`, `:normal` or `:minimal`.
@@ -298,13 +307,46 @@ defmodule APIacAuthMTLS do
     end
   end
 
+  defp do_extract_credentials(conn, %{cert_data_origin: :header_cert}) do
+    do_extract_credentials(conn, %{cert_data_origin: {:header_cert, "Client-Cert"}})
+  end
+
   defp do_extract_credentials(conn, %{cert_data_origin: {:header_cert, header_name}}) do
     case Plug.Conn.get_req_header(conn, String.downcase(header_name)) do
       [] ->
         {:error, conn, :no_cert_header_value}
 
+      [b64_der_cert] ->
+        with {:ok, der_cert} <- Base.decode64(b64_der_cert),
+             {:ok, cert} <- X509.Certificate.from_der(der_cert)
+        do
+          {:ok, cert}
+        else
+          :error ->
+            {:error, :invalid_b64_encoding_der_cert}
+
+          {:error, _} ->
+            {:error, :invalid_der_cert}
+        end
+
+      [_ | _] ->
+        {:error, conn, :multiple_certs_in_header}
+    end
+  end
+
+  defp do_extract_credentials(conn, %{cert_data_origin: {:header_cert_pem, header_name}}) do
+    case Plug.Conn.get_req_header(conn, String.downcase(header_name)) do
+      [] ->
+        {:error, conn, :no_cert_header_value}
+
       [pem_cert] ->
-        X509.Certificate.from_pem(pem_cert)
+        case X509.Certificate.from_pem(pem_cert) do
+          {:ok, cert} ->
+            {:ok, cert}
+
+          {:error, _} ->
+            {:error, :invalid_pem_cert}
+        end
 
       [_ | _] ->
         {:error, conn, :multiple_certs_in_header}
@@ -445,7 +487,7 @@ defmodule APIacAuthMTLS do
   end
 
   defp do_validate_pki_cert(:tls_client_auth_subject_dn, cert, dn) do
-    # FIXME: is comparing string representations of this DNs ok on a security
+    # FIXME: is comparing string serialization of this DNs ok on a security
     # point of view? Or shall we compare the raw SDNs?
     # See further https://tools.ietf.org/html/rfc5280#section-7.1
     cert
