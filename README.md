@@ -3,7 +3,8 @@
 ** WIP - do not use in prod env **
 
 An `APIac.Authenticator` plug implementing **section 2** of
-[OAuth 2.0 Mutual-TLS Client Authentication and Certificate-Bound Access Tokens](https://tools.ietf.org/html/draft-ietf-oauth-mtls-17)
+OAuth 2.0 Mutual-TLS Client Authentication and Certificate-Bound Access Tokens
+([RFC8705](https://tools.ietf.org/html/rfc8705))
 
 Using this scheme, authentication is performed thanks to 2 elements:
 - TLS client certificate authentication
@@ -11,7 +12,7 @@ Using this scheme, authentication is performed thanks to 2 elements:
 
 TLS client certificate authentication may be performed thanks to two methods:
 - authentication with a certificate issued by a Certificate Authority (CA) which is called
-[PKI Mutual TLS OAuth Client Authentication Method](https://tools.ietf.org/html/draft-ietf-oauth-mtls-17#section-2.1).
+[PKI Mutual-TLS Method](https://tools.ietf.org/html/rfc8705#section-2.1).
 In this case, one of the following certificate attribute is checked against
 this attribute registered for the `client_id`:
   - Distinguished name
@@ -19,8 +20,8 @@ this attribute registered for the `client_id`:
   - SAN URI
   - SAN IP address
   - SAN email
-- authentication with a self-signed, self-issued certificate which is called [Self-Signed Certificate
-Mutual TLS OAuth Client Authentication Method](https://tools.ietf.org/html/draft-ietf-oauth-mtls-17#section-2.2).
+- authentication with a self-signed, self-issued certificate which is called
+[Self-Signed Certificate Mutual-TLS Method](https://tools.ietf.org/html/rfc8705#section-2.2).
 In this case, the certificate is checked against the **subject public key info**
 of the registered certificates of the `client_id`
 
