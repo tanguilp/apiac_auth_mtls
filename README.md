@@ -1,7 +1,5 @@
 # APIacAuthMTLS
 
-** WIP - do not use in prod env **
-
 An `APIac.Authenticator` plug implementing **section 2** of
 OAuth 2.0 Mutual-TLS Client Authentication and Certificate-Bound Access Tokens
 ([RFC8705](https://tools.ietf.org/html/rfc8705))
@@ -30,7 +28,7 @@ of the registered certificates of the `client_id`
 ```elixir
 def deps do
   [
-    {:apiac_auth_mtls, github: "tanguilp/apiac_auth_mtls", tag: "0.2.0"}
+    {:apiac_auth_mtls, github: "tanguilp/apiac_auth_mtls", tag: "0.3.0"}
   ]
 end
 ```
