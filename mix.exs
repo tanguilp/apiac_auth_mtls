@@ -4,7 +4,8 @@ defmodule APIacAuthMTLS.MixProject do
   def project do
     [
       app: :apiac_auth_mtls,
-      version: "0.3.0",
+      description: "APIac Elixir plug for mutual TLS authentication (RFC8705)",
+      version: "1.0.0",
       elixir: "~> 1.7",
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),
@@ -12,23 +13,23 @@ defmodule APIacAuthMTLS.MixProject do
       docs: [
         main: "readme",
         extras: ["README.md"]
-      ]
+      ],
+      package: package(),
+      source_url: "https://github.com/tanguilp/apiac_auth_mtls"
     ]
   end
 
-  # Run "mix help compile.app" to learn about applications.
   def application do
     [
       extra_applications: [:logger]
     ]
   end
 
-  # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
       {:plug, "~> 1.0"},
-      {:apiac, github: "tanguilp/apiac", tag: "0.3.0"},
-      {:oauth2_utils, github: "tanguilp/oauth2_utils", tag: "master"},
+      {:apiac, "~> 1.0"},
+      {:oauth2_utils, "~> 0.1.0"},
       {:x509, "~> 0.8.0"},
       {:plug_cowboy, "~> 2.0", only: :test},
       {:poison, "~> 4.0", only: :test},
@@ -39,4 +40,11 @@ defmodule APIacAuthMTLS.MixProject do
 
   defp elixirc_paths(:test), do: ["lib", "test/support"]
   defp elixirc_paths(_), do: ["lib"]
+
+  def package() do
+    [
+      licenses: ["Apache-2.0"],
+      links: %{"GitHub" => "https://github.com/tanguilp/apiac_auth_mtls"}
+    ]
+  end
 end

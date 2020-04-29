@@ -28,7 +28,7 @@ of the registered certificates of the `client_id`
 ```elixir
 def deps do
   [
-    {:apiac_auth_mtls, github: "tanguilp/apiac_auth_mtls", tag: "0.3.0"}
+    {:apiac_auth_mtls, "~> 1.0"},
   ]
 end
 ```
