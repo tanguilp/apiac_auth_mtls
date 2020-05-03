@@ -230,7 +230,7 @@ defmodule APIacAuthMTLS do
     end
   end
 
-  def do_call(conn, opts) do
+  defp do_call(conn, opts) do
     with {:ok, conn, credentials} <- extract_credentials(conn, opts),
          {:ok, conn} <- validate_credentials(conn, credentials, opts) do
       conn
