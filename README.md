@@ -66,14 +66,14 @@ native OTP certificate structure
   - `{:header_cert_pem, "Header-Name"}`: the whole certificate is forwarded in the
   "Header-Name" as a PEM-encoded string and retrieved by this plug
 - `:set_error_response`: function called when authentication failed. Defaults to
-`APIacAuthBasic.send_error_response/3`
+`APIacAuthMTLS.send_error_response/3`
 - `:error_response_verbosity`: one of `:debug`, `:normal` or `:minimal`.
 Defaults to `:normal`
 
 ## Example
 
 ```elixir
-plug APIacAuthBasic, allowed_methods: :both,
+plug APIacAuthMTLS, allowed_methods: :both,
                       selfsigned_callback: &selfsigned_certs/1,
                       pki_callback: &get_dn/1
 
